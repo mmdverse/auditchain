@@ -1,5 +1,7 @@
 # auditchain
 
+[![CI](https://github.com/mmdverse/auditchain/actions/workflows/ci.yml/badge.svg)](https://github.com/mmdverse/auditchain/actions/workflows/ci.yml)
+
 Tamper-evident, hash-chained audit logging for Python.
 Async-first, zero runtime dependencies.
 
