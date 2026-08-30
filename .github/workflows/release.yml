@@ -27,6 +27,7 @@ jobs:
 
   github-release:
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -44,6 +45,7 @@ jobs:
   # PyPI (trusted publishers) for owner mmdverse / repo auditchain / this workflow.
   pypi:
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
     steps:
