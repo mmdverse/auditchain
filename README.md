@@ -120,6 +120,11 @@ so it drops straight into CI.
 
 - 0.2: Postgres backend, key rotation, periodic checkpoints for huge logs
 
+## Why hash chains?
+
+Read the full argument — threat model, honest limits, and when to anchor digests —
+in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md).
+
 ## خلاصهٔ فارسی
 
 **auditchain** یک کتابخانهٔ پایتونی برای لاگ حسابرسیِ ضدتغییر است. هر رکورد با هشِ
