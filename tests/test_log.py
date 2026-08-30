@@ -103,3 +103,29 @@ async def test_context_manager(log):
         await ctx.append("sara", "login")
         report = await ctx.verify()
         assert report.ok
+
+
+async def test_append_many_and_chain_integrity(log):
+    recs = await log.append_many(
+        [
+            ("sara", "login", "", {"ip": "10.0.0.1"}),
+            ("jawad", "update", "invoice:1", {"field": "status"}),
+            ("sara", "logout", "", None),
+        ]
+    )
+    assert [r.seq for r in recs] == [0, 1, 2]
+    assert recs[1].prev_hash == recs[0].hash
+    assert recs[2].prev_hash == recs[1].hash
+    report = await log.verify()
+    assert report.ok and report.records_checked == 3
+
+
+async def test_append_many_empty_is_noop(log):
+    assert await log.append_many([]) == []
+    assert await log.read() == []
+
+
+async def test_append_many_validation_failure_writes_nothing(log):
+    with pytest.raises(ValueError, match="JSON-serializable"):
+        await log.append_many([("sara", "ok", "", None), ("sara", "bad", "", {"x": object()})])
+    assert await log.read() == []

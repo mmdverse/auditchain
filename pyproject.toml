@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditchain"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tamper-evident, hash-chained audit logging for Python. Async-first, zero runtime dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Mohammad" }]
 keywords = ["audit", "audit-log", "logging", "security", "compliance", "tamper-evident", "hash-chain", "hmac"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -31,6 +31,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
+postgres = ["asyncpg>=0.30"]
 
 [project.scripts]
 auditchain = "auditchain.__main__:main"
@@ -51,3 +52,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "postgres: requires a PostgreSQL server (set AUDITCHAIN_TEST_POSTGRES_DSN)",
+]

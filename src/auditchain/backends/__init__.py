@@ -3,6 +3,7 @@
 from .base import BackendError, LogCorruptedError, StorageBackend
 from .jsonl import JsonlBackend
 from .memory import MemoryBackend
+from .postgres import PostgresBackend
 from .sqlite import SqliteBackend
 
 __all__ = [
@@ -10,6 +11,7 @@ __all__ = [
     "JsonlBackend",
     "LogCorruptedError",
     "MemoryBackend",
+    "PostgresBackend",
     "SqliteBackend",
     "StorageBackend",
 ]

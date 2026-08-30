@@ -87,3 +87,47 @@ def test_seal_key_too_short_is_rejected():
 
     with pytest.raises(ValueError, match="seal_key"):
         AuditLog(MemoryBackend(), seal_key=b"short")
+
+
+def test_key_id_is_not_hashed():
+    # 0.2 stores key_id next to the record but must NOT change the hashed payload;
+    # otherwise every v0.1 log would stop verifying.
+    a = _record(key_id="k1")
+    b = _record(key_id="k2")
+    assert a.to_payload_bytes() == b.to_payload_bytes()
+    assert compute_record_hash(a, None) == compute_record_hash(b, None)
+    assert a.key_id != b.key_id
+
+
+def test_key_id_roundtrip_through_stored_dict():
+    record = _record(key_id="k7", hash="ab" * 32)
+    restored = AuditRecord.from_stored(
+        {
+            "seq": record.seq,
+            "ts": record.timestamp,
+            "actor": record.actor,
+            "action": record.action,
+            "subject": record.subject,
+            "meta": record.metadata,
+            "prev_hash": record.prev_hash,
+            "hash": record.hash,
+            "key_id": record.key_id,
+        }
+    )
+    assert restored.key_id == "k7"
+
+
+def test_missing_key_id_defaults_to_empty():
+    restored = AuditRecord.from_stored(
+        {
+            "seq": 0,
+            "ts": "2026-08-30T12:00:00Z",
+            "actor": "sara",
+            "action": "login",
+            "subject": "",
+            "meta": {},
+            "prev_hash": "0" * 64,
+            "hash": "ab" * 32,
+        }
+    )
+    assert restored.key_id == ""

@@ -22,9 +22,18 @@ class AuditRecord:
     metadata: dict[str, Any]
     prev_hash: str
     hash: str
+    #: Identifier of the HMAC key that sealed this record. Stored next to the
+    #: record but deliberately NOT part of the hashed payload, so that adding key
+    #: rotation in 0.2 kept every v0.1 log verifiable. Empty for integrity-only
+    #: (SHA-256) records and for records written before 0.2.
+    key_id: str = ""
 
     def to_payload_dict(self) -> dict[str, Any]:
-        """All fields that participate in the hash, as a JSON-safe dict."""
+        """All fields that participate in the hash, as a JSON-safe dict.
+
+        ``key_id`` is intentionally excluded: it selects the verification key and
+        is not covered by the hash (see the class docstring).
+        """
         return {
             "seq": self.seq,
             "ts": self.timestamp,
@@ -54,4 +63,5 @@ class AuditRecord:
             metadata=dict(meta),
             prev_hash=str(stored["prev_hash"]),
             hash=str(stored["hash"]),
+            key_id=str(stored.get("key_id", "")),
         )

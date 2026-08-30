@@ -25,3 +25,31 @@ jobs:
           ruff format --check src tests
       - name: Test
         run: pytest -q
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: audit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (with postgres extra)
+        run: pip install -e ".[dev,postgres]"
+      - name: Test (PostgreSQL backend)
+        env:
+          AUDITCHAIN_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/audit_test
+        run: pytest -q -m postgres

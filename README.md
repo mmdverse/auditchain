@@ -25,15 +25,21 @@ the whole chain in O(n) and reports the first broken link.
 ## Features
 
 - Async-first API (`AuditLog`) plus thin sync wrappers (`SyncAuditLog`)
-- Backends: `SqliteBackend`, `JsonlBackend`, `MemoryBackend` (more planned)
-- HMAC-SHA256 sealing, or plain SHA-256 integrity without a key
-- `verify()` API and a `verify` CLI (exit code 1 on failure — CI friendly)
-- Zero runtime dependencies, Python 3.10+, fully typed (`py.typed`)
+- Backends: `SqliteBackend`, `JsonlBackend`, `MemoryBackend`, `PostgresBackend`
+- HMAC-SHA256 sealing with **key rotation** (per-record `key_id`), or plain SHA-256
+  integrity without a key
+- **Checkpoints**: signed anchors that detect tail truncation and prove a chain's
+  state at a point in time
+- Batch appends (`append_many`) — one write for many records
+- `verify()` API and a `verify`/`checkpoint` CLI (exit code 1 on failure — CI friendly)
+- Zero runtime dependencies (the `postgres` extra adds `asyncpg`), Python 3.10+,
+  fully typed (`py.typed`)
 
 ## Install
 
 ```bash
-pip install auditchain
+pip install auditchain                # sqlite / jsonl / memory backends
+pip install "auditchain[postgres]"    # + PostgreSQL backend (asyncpg)
 ```
 
 ## Quickstart (async)
@@ -66,6 +72,52 @@ Without a `seal_key`, tampering is still detected — but only by integrity; any
 can write the log can rewrite it and re-seal it. Use a key when attackers might have
 write access. Keep the key outside the log (env var, secret manager, file).
 
+## Key rotation
+
+Rotate the seal key and the chain records the rotation itself (the marker is sealed
+with the old key, so it documents the decision under the key that was in effect):
+
+```python
+log = AuditLog(SqliteBackend("audit.sqlite"), seal_key=key0, key_id="k0")
+await log.append("sara", "login")
+
+await log.rotate(new_key, "k1")       # appends a "key.rotate" marker, switches key
+await log.append("jawad", "logout")
+
+report = await log.verify()           # uses the keyring (retired keys) automatically
+```
+
+Pass retired keys explicitly (or to `verify`) when reopening outside the same object:
+
+```python
+log = AuditLog(SqliteBackend("audit.sqlite"), seal_key=new_key, key_id="k1",
+               keyring={"k0": key0})
+```
+
+`key_id` is stored next to each record but is **not** part of the hashed payload, so
+logs written by v0.1 (which has no key ids) still verify — and records from 0.1 that
+were sealed keep working with the same key.
+
+## Checkpoints (anchors)
+
+The chain alone cannot detect someone deleting the *last* records — the remaining
+chain still links cleanly. A checkpoint is a signed anchor ("at seq N, the chain hash
+was H") that you store **outside the log's trust boundary** and verify against later:
+
+```python
+cp = await log.checkpoint()                 # anchor the current tail
+save_checkpoint(cp, "anchors/audit.checkpoint")   # e.g. other machine, object storage
+
+# later, on a possibly-tampered copy:
+log = AuditLog(SqliteBackend("audit.sqlite"), seal_key=key)
+report = await log.verify(checkpoint=load_checkpoint("anchors/audit.checkpoint", key))
+# FAILED: chain ends before the checkpoint: tail truncation
+```
+
+Checkpoints with a seal key are signed (HMAC-SHA256), so a forged or edited
+checkpoint file is rejected. Without a key, the checkpoint is unsigned and only as
+trustworthy as the place you store it.
+
 ## Sync API
 
 ```python
@@ -82,11 +134,15 @@ already-running loop.
 
 ## Backends
 
-| Backend        | Used for                          |
-| -------------- | --------------------------------- |
-| `SqliteBackend`| Real applications (durable, queryable) |
-| `JsonlBackend` | Simple logs, git-friendly, streaming-friendly |
-| `MemoryBackend`| Short-lived processes, tests      |
+| Backend         | Used for                                  |
+| --------------- | ----------------------------------------- |
+| `SqliteBackend` | Real applications (durable, queryable)    |
+| `PostgresBackend` | Multi-service setups, shared/remote storage |
+| `JsonlBackend`  | Simple logs, git-friendly, streaming-friendly |
+| `MemoryBackend` | Short-lived processes, tests              |
+
+`PostgresBackend` takes a DSN (asyncpg) and stores the same record shape; v0.1
+SQLite databases are migrated in place on first open (the `key_id` column is added).
 
 ## Verify from the CLI
 
@@ -94,6 +150,10 @@ already-running loop.
 # format is auto-detected from the extension
 python -m auditchain verify audit.sqlite
 auditchain verify audit.jsonl --seal-key-file seal.key --expected-count 1000
+auditchain verify audit.sqlite --checkpoint anchors/audit.checkpoint
+
+# write an anchor after each batch (e.g. in CI/cron)
+auditchain checkpoint audit.sqlite --output anchors/audit.checkpoint --seal-key-file seal.key
 ```
 
 Example output when the log was tampered with:
@@ -109,18 +169,19 @@ so it drops straight into CI.
 ## Security model — be honest about limits
 
 - **Detected:** modification of any record, insertion, reordering, removal of middle
-  records, sequence gaps, count mismatches (with `--expected-count`).
-- **Not detectable from the chain alone:** removal of the *last* records (tail
-  truncation). Pass `expected_count` to `verify()` if that matters to you.
-- **Single writer:** one process appends at a time. Concurrent appends are not
-  supported in 0.1.
-- Without a `seal_key`, records are integrity-protected, not authenticated.
+  records, sequence gaps, unknown key ids, count mismatches (with `--expected-count`),
+  and tail truncation (with a `--checkpoint` anchor or `expected_count`).
+- **Not detectable from the chain alone, without an anchor:** removal of the *last*
+  records. Keep a `checkpoint` outside the log's trust boundary, or pass
+  `expected_count` to `verify()`.
+- **Single writer:** one process appends at a time. Use a queue/lock for writers;
+  the chain must be serialized.
+- Without a `seal_key`, records are integrity-protected, not authenticated — an
+  attacker who can rewrite the log can re-seal it.
+- **Key rotation only helps if you control the keyring.** Store retired keys safely;
+  losing a key means the records sealed with it fail verification.
 
-## Roadmap
-
-- 0.2: Postgres backend, key rotation, periodic checkpoints for huge logs
-
-## Why hash chains?
+## Beyond the basics
 
 Read the full argument — threat model, honest limits, and when to anchor digests —
 in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md).
@@ -130,8 +191,9 @@ in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md).
 **auditchain** یک کتابخانهٔ پایتونی برای لاگ حسابرسیِ ضدتغییر است. هر رکورد با هشِ
 رکورد قبلی زنجیر می‌شود (و در صورت دادن `seal_key` با HMAC-SHA256 امضا می‌گردد)،
 بنابراین هر تغییر بعدی — ویرایش، جابه‌جایی، حذف یا درج — زنجیره را می‌شکند و
-`verify` دقیقاً نشان می‌دهد کجا. بدون وابستگی، async-first، با بک‌اندهای
-SQLite/JSONL و یک CLI که خروجی آن برای CI مناسب است (کد خروج ۱ یعنی زنجیره شکسته).
+`verify` دقیقاً نشان می‌دهد کجا. بدون وابستگی، async-first؛ بک‌اندهای
+SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضاشده (checkpoint) برای
+تشخیص بریده‌شدن انتهای زنجیره؛ و CLI با کد خروج مناسب CI (کد ۱ یعنی زنجیره شکسته).
 
 ## License
 

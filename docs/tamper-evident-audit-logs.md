@@ -78,7 +78,9 @@ leaves a perfectly valid chain behind. Two practical fixes:
 - pass an **expected record count** to `verify()` (the CLI flag `--expected-count`);
 - or **anchor** the latest hash somewhere the writer cannot reach — a signed digest
   to a second system, an email, a SIEM, anything immutable. The anchor turns the
-  tail cut into a provable break.
+  tail cut into a provable break. (auditchain's `checkpoint` command writes exactly
+  such an anchor: the chain hash at a sequence number, HMAC-signed with the seal key
+  and rejected if tampered with.)
 
 **A key is only as good as its custody.** HMAC-SHA256 sealing protects against
 attackers who can write the log but not read the key. A key stored next to the log
@@ -91,6 +93,11 @@ your writes or use a queue; the chain must be serialized.
 **Detectability ≠ prevention.** Hash chains detect tampering after the fact. They
 don't stop it. For prevention you still need access control, least privilege, and
 audited key management.
+
+**Key rotation is only as sound as your keyring.** Rotating the HMAC key regularly
+(and on suspicion of compromise) is good practice; the log records the rotation
+itself. But records sealed with a retired key can only be verified while you still
+hold that key — store retired keys safely and document their custody.
 
 ## 6. What it looks like in practice
 

@@ -21,3 +21,22 @@ def test_sync_persists_across_reopen(tmp_path):
     assert rec.seq == 1
     assert reopened.verify().ok
     reopened.close()
+
+
+def test_sync_append_many_checkpoint_rotate(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    log = SyncAuditLog(JsonlBackend(path), seal_key=b"a" * 32, key_id="k0")
+    recs = log.append_many(
+        [("sara", "login", "", None), ("jawad", "update", "invoice:1", {"f": "x"})]
+    )
+    assert [r.seq for r in recs] == [0, 1]
+    assert log.verify().ok
+    marker = log.rotate(b"b" * 32, "k1")
+    assert marker.action == "key.rotate"
+    log.append("sara", "logout")
+    report = log.verify()
+    assert report.ok, report
+    cp = log.checkpoint()
+    assert cp.seq == 3
+    assert log.verify(checkpoint=cp).ok
+    log.close()

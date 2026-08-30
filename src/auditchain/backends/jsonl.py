@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..records import AuditRecord
@@ -13,8 +14,8 @@ from .base import LogCorruptedError, StorageBackend
 class JsonlBackend(StorageBackend):
     """Appends one JSON object per line.
 
-    Each line contains the full payload plus ``hash``. Lines are never rewritten;
-    verification (re)reads the file and rebuilds the chain.
+    Each line contains the full payload plus ``hash`` (and ``key_id`` when sealed).
+    Lines are never rewritten; verification (re)reads the file and rebuilds the chain.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -23,7 +24,8 @@ class JsonlBackend(StorageBackend):
     async def init(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def append(self, record: AuditRecord) -> None:
+    @staticmethod
+    def _serialize(record: AuditRecord) -> str:
         payload = {
             "seq": record.seq,
             "ts": record.timestamp,
@@ -34,12 +36,27 @@ class JsonlBackend(StorageBackend):
             "prev_hash": record.prev_hash,
             "hash": record.hash,
         }
-        line = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        await asyncio.to_thread(self._append_line, line)
+        if record.key_id:
+            payload["key_id"] = record.key_id
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    async def append(self, record: AuditRecord) -> None:
+        await asyncio.to_thread(self._append_line, self._serialize(record))
 
     def _append_line(self, line: str) -> None:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+
+    async def append_many(self, records: Sequence[AuditRecord]) -> None:
+        lines = [self._serialize(record) for record in records]
+
+        def _append_lines() -> None:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines))
+                if lines:
+                    handle.write("\n")
+
+        await asyncio.to_thread(_append_lines)
 
     async def load(self) -> list[AuditRecord]:
         def _read() -> list[str]:
