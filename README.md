@@ -184,7 +184,8 @@ so it drops straight into CI.
 ## Beyond the basics
 
 Read the full argument — threat model, honest limits, and when to anchor digests —
-in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md).
+in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md)
+or on [DEV Community](https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-chain-3loo).
 
 ## خلاصهٔ فارسی
 
