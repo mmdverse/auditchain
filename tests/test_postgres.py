@@ -1,11 +1,14 @@
 import os
 import uuid
 
-import asyncpg
 import pytest
 import pytest_asyncio
 
 from auditchain import AuditLog, PostgresBackend, verify_chain
+
+asyncpg = pytest.importorskip(
+    "asyncpg", reason="requires the 'postgres' extra: pip install auditchain[postgres]"
+)
 
 DSN = os.environ.get("AUDITCHAIN_TEST_POSTGRES_DSN")
 
