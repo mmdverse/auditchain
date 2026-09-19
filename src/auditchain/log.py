@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .backends import StorageBackend
 from .checkpoint import Checkpoint, make_checkpoint
 from .hash import compute_record_hash
+from .locks import BaseLock, FileLock, NoLock
 from .merkle import InclusionProof, merkle_proof, merkle_root
 from .records import GENESIS_HASH, AuditRecord
 from .signing import load_private_key, sign_record
@@ -41,6 +43,11 @@ class AuditLog:
     thing HMAC cannot: an auditor holding only the public key can verify the log but
     cannot forge records, because they never hold the signing key. Requires the
     optional ``auditchain[ed25519]`` extra.
+
+    ``lock`` (or the ``lock_path`` shorthand) makes several **processes** share one log
+    safely. While the lock is held, the tail is re-read from the backend before each
+    append, so writers chain onto what is really stored rather than what they last saw.
+    See :mod:`auditchain.locks`.
     """
 
     def __init__(
@@ -52,6 +59,8 @@ class AuditLog:
         keyring: dict[str, bytes] | None = None,
         signing_key: Any | None = None,
         signer_id: str = "s0",
+        lock: BaseLock | None = None,
+        lock_path: str | Path | None = None,
     ) -> None:
         if seal_key is not None and len(seal_key) < _MIN_KEY_LENGTH:
             raise ValueError(f"seal_key must be at least {_MIN_KEY_LENGTH} bytes")
@@ -65,6 +74,10 @@ class AuditLog:
         self._keyring: dict[str, bytes] = dict(keyring or {})
         if seal_key is not None:
             self._keyring[key_id] = seal_key
+        if lock is not None and lock_path is not None:
+            raise ValueError("pass either lock or lock_path, not both")
+        self._lock: BaseLock = lock or (FileLock(lock_path) if lock_path else NoLock())
+        self._shared = not isinstance(self._lock, NoLock)
         self._last: AuditRecord | None = None
         self._inited = False
 
@@ -135,12 +148,25 @@ class AuditLog:
         """Append one record and return it. ``actor``/``action`` are required."""
         if not self._inited:
             await self.init()
-        sealed = self._seal(
-            self._build_record(actor, action, subject, dict(metadata or {}), timestamp, self._last)
-        )
-        await self.backend.append(sealed)
-        self._last = sealed
+        with self._lock:
+            await self._refresh_tail()
+            sealed = self._seal(
+                self._build_record(
+                    actor, action, subject, dict(metadata or {}), timestamp, self._last
+                )
+            )
+            await self.backend.append(sealed)
+            self._last = sealed
         return sealed
+
+    async def _refresh_tail(self) -> None:
+        """Re-read the tail while holding the lock, so other writers are included.
+
+        Without a shared lock the cached tail is authoritative and the extra read is
+        skipped; with one, another process may have appended since we last wrote.
+        """
+        if self._shared:
+            self._last = await self.backend.load_last()
 
     async def append_many(
         self, entries: Sequence[tuple[str, str, str, dict[str, Any] | None]]
@@ -150,16 +176,20 @@ class AuditLog:
         """
         if not self._inited:
             await self.init()
-        sealed: list[AuditRecord] = []
-        prev = self._last
-        for actor, action, subject, metadata in entries:
-            record = self._build_record(actor, action, subject, dict(metadata or {}), None, prev)
-            sealed.append(self._seal(record))
-            prev = sealed[-1]
-        if not sealed:
-            return []
-        await self.backend.append_many(sealed)
-        self._last = sealed[-1]
+        with self._lock:
+            await self._refresh_tail()
+            sealed: list[AuditRecord] = []
+            prev = self._last
+            for actor, action, subject, metadata in entries:
+                record = self._build_record(
+                    actor, action, subject, dict(metadata or {}), None, prev
+                )
+                sealed.append(self._seal(record))
+                prev = sealed[-1]
+            if not sealed:
+                return []
+            await self.backend.append_many(sealed)
+            self._last = sealed[-1]
         return sealed
 
     async def rotate(

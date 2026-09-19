@@ -125,6 +125,27 @@ class PostgresBackend(StorageBackend):
             for row in rows
         ]
 
+    async def load_last(self) -> AuditRecord | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(f"{_SELECT_SQL.format(table=self.table)} DESC LIMIT 1")
+        if row is None:
+            return None
+        return AuditRecord.from_stored(
+            {
+                "seq": row["seq"],
+                "ts": row["ts"],
+                "actor": row["actor"],
+                "action": row["action"],
+                "subject": row["subject"],
+                "meta": json.loads(row["meta"]),
+                "prev_hash": row["prev_hash"],
+                "hash": row["hash"],
+                "key_id": row["key_id"],
+                "signer_id": row["signer_id"],
+                "signature": row["signature"],
+            }
+        )
+
     async def close(self) -> None:
         if self._pool is not None:
             await self._pool.close()

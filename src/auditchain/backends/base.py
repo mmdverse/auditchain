@@ -37,6 +37,15 @@ class StorageBackend(abc.ABC):
     async def load(self) -> list[AuditRecord]:
         """Load all records in order."""
 
+    async def load_last(self) -> AuditRecord | None:
+        """Load only the last record, or None for an empty log.
+
+        Writers sharing a log use this to chain onto the real tail instead of a stale
+        cached one; backends override it with an O(1) read where they can.
+        """
+        records = await self.load()
+        return records[-1] if records else None
+
     @abc.abstractmethod
     async def close(self) -> None:
         """Release resources."""

@@ -21,5 +21,8 @@ class MemoryBackend(StorageBackend):
     async def load(self) -> list[AuditRecord]:
         return list(self._records)
 
+    async def load_last(self) -> AuditRecord | None:
+        return self._records[-1] if self._records else None
+
     async def close(self) -> None:
         return None

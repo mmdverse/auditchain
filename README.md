@@ -34,6 +34,8 @@ the whole chain in O(n) and reports the first broken link.
   hashes and a root you already trust — without revealing the other records
 - **`logging.Handler`**: drop it on an existing logger and the calls you already write
   become auditable records — written off the application's thread
+- **Multi-process writers**: an advisory file lock (`lock_path=`) plus a tail re-read
+  keeps workers, web processes and cron jobs on one valid chain
 - **Checkpoints**: signed anchors that detect tail truncation and prove a chain's
   state at a point in time
 - Batch appends (`append_many`) — one write for many records
@@ -256,6 +258,40 @@ Details worth knowing:
 - Set `background=False` to write through synchronously (useful in scripts and tests);
   it refuses to run inside an event loop, where you want the default instead.
 
+## Many processes, one log
+
+Workers, web processes and cron jobs can append to the same log. Pass a lock and every
+writer re-reads the tail of the log before building its next record, so it chains onto
+what is really stored instead of what it last saw:
+
+```python
+log = AuditLog(SqliteBackend("audit.sqlite"), lock_path="audit.lock")
+```
+
+```python
+lock = FileLock("/var/lib/myapp/audit.lock")          # or share one object
+log = AuditLog(SqliteBackend("audit.sqlite"), lock=lock)
+```
+
+What that buys, and what it does not:
+
+- The lock is an advisory `flock` (POSIX) or `msvcrt.locking` (Windows) on a lock file
+  next to the log. **A crashed process cannot leave the log locked** — the OS drops the
+  lock with the process. `timeout=` turns a long wait into `LockTimeout`.
+- It serializes the writers that use it, **on one machine**. It is not a distributed
+  lock and it does not stop a rogue process from writing to the storage directly.
+- Several machines need a lock that lives with the data: pass your own `lock=` object
+  (Postgres advisory lock, Redis, etc.). Anything with `acquire()`/`release()` works,
+  and the tail re-read happens while it is held.
+- Readers and `verify()` never take the lock.
+- Without the lock, two long-lived writers that both saw an empty log write sequence 0
+  twice: SQLite refuses the second insert with an `IntegrityError`, while a JSONL file
+  ends up with a broken chain that only verification notices.
+
+Honest data point: four processes appending 15 records each to one SQLite log →
+seq 0..59, contiguous `prev_hash` links, valid chain, every record sealed. That is
+`tests/test_locks.py`, not a claim.
+
 ## Backends
 
 | Backend         | Used for                                  |
@@ -304,9 +340,10 @@ so it drops straight into CI.
 - **Inclusion proofs prove membership, not freshness.** A proof only says "this record
   is in the log with this root". An old root stays valid forever — the anchor's
   timestamp and what you do with it are yours to manage.
-- **Single writer:** one process appends at a time. Use a queue/lock for writers;
-  the chain must be serialized. `logging.Handler` with `background=True` (the default)
-  already funnels every thread through one worker, but not across processes.
+- **Single writer at a time:** the chain must be serialized. `logging.Handler` with
+  `background=True` funnels a process's threads through one worker; for several
+  processes pass `lock_path=`/`lock=` (advisory, one machine) or a lock that lives with
+  the data (Postgres advisory lock, Redis) across machines.
 - Without a `seal_key`, records are integrity-protected, not authenticated — an
   attacker who can rewrite the log can re-seal it.
 - HMAC also fails against an attacker who holds the seal key: they can rewrite records
@@ -333,7 +370,9 @@ SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضا�
 مرکل: با یک ریشهٔ مورد اعتماد و ~log₂n هش می‌توان ثابت کرد یک رکورد مشخص عضو همین
 لاگ است، بدون افشای بقیهٔ رکوردها؛ و یک `logging.Handler` آماده که با اضافه‌کردنش به
 لاگرهای موجود، همان `logger.info(...)`‌هایی که از قبل می‌نویسید به رکورد حسابرسی
-تبدیل می‌شوند (نوشتن در ترد جداگانه، پس مسیر درخواست کند نمی‌شود). checkpoint ریشهٔ مرکل را هم امضا می‌کند و CLI با
+تبدیل می‌شوند (نوشتن در ترد جداگانه، پس مسیر درخواست کند نمی‌شود)؛ و نوشتن امن از چند
+پروسه با یک قفل فایل (`lock_path=`) که پیش از هر append، انتهای زنجیره را از استوریج
+دوباره می‌خواند. checkpoint ریشهٔ مرکل را هم امضا می‌کند و CLI با
 کد خروج مناسب CI کار می‌کند (کد ۱ یعنی زنجیره شکسته یا اثبات نامعتبر).
 
 ## License

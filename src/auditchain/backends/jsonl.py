@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -81,6 +82,36 @@ class JsonlBackend(StorageBackend):
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 raise LogCorruptedError(f"{self.path}:{lineno}: {exc}") from exc
         return records
+
+    async def load_last(self) -> AuditRecord | None:
+        """Read the tail of the file, scanning backwards instead of loading everything."""
+
+        def _last_line() -> str | None:
+            if not self.path.exists():
+                return None
+            with self.path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                position = handle.tell()
+                buffer = b""
+                while position > 0:
+                    step = min(65536, position)
+                    position -= step
+                    handle.seek(position)
+                    buffer = handle.read(step) + buffer
+                    lines = [line for line in buffer.split(b"\n") if line.strip()]
+                    # The first chunk may end mid-line; one complete line before the
+                    # final piece means the last non-empty line is complete.
+                    if len(lines) > 1 or (position == 0 and lines):
+                        return lines[-1].decode("utf-8")
+                return None
+
+        line = await asyncio.to_thread(_last_line)
+        if not line:
+            return None
+        try:
+            return AuditRecord.from_stored(json.loads(line))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise LogCorruptedError(f"{self.path}: last line: {exc}") from exc
 
     async def close(self) -> None:
         return None

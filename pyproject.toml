@@ -62,4 +62,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "postgres: requires a PostgreSQL server (set AUDITCHAIN_TEST_POSTGRES_DSN)",
+    "slow: spawns real processes and takes a moment",
 ]

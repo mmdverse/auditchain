@@ -29,6 +29,7 @@ from .backends import (
 from .checkpoint import Checkpoint, load_checkpoint, make_checkpoint, save_checkpoint
 from .handlers import AuditLogHandler
 from .hash import compute_record_hash, verify_record_hash
+from .locks import BaseLock, FileLock, LockError, LockTimeout, NoLock
 from .log import AuditLog
 from .merkle import InclusionProof, ProofStep, merkle_proof, merkle_root
 from .records import GENESIS_HASH, AuditRecord
@@ -48,13 +49,18 @@ __all__ = [
     "AuditLog",
     "AuditLogHandler",
     "AuditRecord",
+    "BaseLock",
     "BackendError",
     "Checkpoint",
+    "FileLock",
     "GENESIS_HASH",
     "InclusionProof",
     "JsonlBackend",
+    "LockError",
+    "LockTimeout",
     "LogCorruptedError",
     "MemoryBackend",
+    "NoLock",
     "PostgresBackend",
     "ProofStep",
     "SqliteBackend",
