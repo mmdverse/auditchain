@@ -33,6 +33,8 @@ the whole chain in O(n) and reports the first broken link.
   only, so they can check the log without being able to forge it
 - **Merkle inclusion proofs**: prove that one record belongs to the log using ~log₂n
   hashes and a root you already trust — without revealing the other records
+- **Ed25519-signed checkpoints**: the anchor itself is verifiable with the public key, so
+  an outsider never needs the secret that could re-seal the log
 - **`logging.Handler`**: drop it on an existing logger and the calls you already write
   become auditable records — written off the application's thread
 - **Multi-process writers**: an advisory file lock (`lock_path=`) plus a tail re-read
@@ -184,10 +186,14 @@ A checkpoint also carries the **Merkle root** of every record behind it, and the
 signature covers that root — which is what makes single-record proofs possible:
 
 ```bash
-auditchain checkpoint audit.sqlite --seal-key-file seal.key   # anchors seq + merkle root
-auditchain proof audit.sqlite --seq 42 --output 42.proof      # ~log2(n) hashes
-auditchain verify-proof 42.proof --checkpoint audit.sqlite.checkpoint --seal-key-file seal.key
+auditchain checkpoint audit.sqlite --signing-key signing.key   # anchors seq + merkle root
+auditchain proof audit.sqlite --seq 42 --output 42.proof       # ~log2(n) hashes
+auditchain verify-proof 42.proof --checkpoint audit.sqlite.checkpoint --public-key signing.pub
 ```
+
+With `--signing-key` the anchor is signed with Ed25519 instead of the HMAC seal key, and
+the verifier opens it with the public key only — no secret on their side. A signed
+checkpoint refuses to load unverified, so "the anchor was checked" is never an assumption.
 
 ```python
 proof = await log.inclusion_proof(42)
@@ -338,6 +344,9 @@ so it drops straight into CI.
 - A checkpoint's Merkle root pins the *content* of everything behind it, not just the
   tail hash: a log that was rewritten, extended or truncated afterwards fails with
   `merkle root mismatch`, even if every hash in it was recomputed with the real key.
+- An Ed25519-signed checkpoint is verified with the public key; its HMAC (when the log is
+  also sealed) is not asked for, because it covers the same message and is the weaker
+  signature.
 - **Inclusion proofs prove membership, not freshness.** A proof only says "this record
   is in the log with this root". An old root stays valid forever — the anchor's
   timestamp and what you do with it are yours to manage.
@@ -373,7 +382,8 @@ SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضا�
 تشخیص بریده‌شدن انتهای زنجیره؛ امضای Ed25519 روی رکوردها (اختیاری، `auditchain[ed25519]`)
 تا حسابرس فقط با کلید عمومی بتواند لاگ را تایید کند و خودش قادر به جعل نباشد؛ و اثبات
 مرکل: با یک ریشهٔ مورد اعتماد و ~log₂n هش می‌توان ثابت کرد یک رکورد مشخص عضو همین
-لاگ است، بدون افشای بقیهٔ رکوردها؛ و یک `logging.Handler` آماده که با اضافه‌کردنش به
+لاگ است، بدون افشای بقیهٔ رکوردها؛ لنگر (checkpoint) را هم می‌توان با Ed25519 امضا کرد
+تا حسابرس بیرونی فقط با کلید عمومی، خودِ لنگر را تایید کند؛ و یک `logging.Handler` آماده که با اضافه‌کردنش به
 لاگرهای موجود، همان `logger.info(...)`‌هایی که از قبل می‌نویسید به رکورد حسابرسی
 تبدیل می‌شوند (نوشتن در ترد جداگانه، پس مسیر درخواست کند نمی‌شود)؛ و نوشتن امن از چند
 پروسه با یک قفل فایل (`lock_path=`) که پیش از هر append، انتهای زنجیره را از استوریج

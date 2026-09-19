@@ -118,20 +118,34 @@ def record_signing_message(record: AuditRecord) -> bytes:
     return f"{record.seq}:{record.hash}:{record.signer_id}".encode()
 
 
+def sign_message(message: bytes, private_key: Any) -> str:
+    """Sign arbitrary bytes and return the hex signature.
+
+    Records and checkpoints sign different messages through this one path, so both use
+    the same key handling and the same hex encoding.
+    """
+    key = load_private_key(private_key)
+    return str(key.sign(message).hex())
+
+
+def verify_signature(signature: str, message: bytes, public_key: Any) -> bool:
+    """Check a hex signature over ``message``. A bad signature returns False."""
+    key = load_public_key(public_key)
+    try:
+        key.verify(bytes.fromhex(signature), message)
+    except (InvalidSignature, ValueError):
+        return False
+    return True
+
+
 def sign_record(record: AuditRecord, private_key: Any) -> str:
     """Return the hex Ed25519 signature for ``record``."""
-    key = load_private_key(private_key)
-    return str(key.sign(record_signing_message(record)).hex())
+    return sign_message(record_signing_message(record), private_key)
 
 
 def verify_record_signature(record: AuditRecord, public_key: Any) -> bool:
     """Check a record's signature against a public key. Never raises on a bad signature."""
-    key = load_public_key(public_key)
-    try:
-        key.verify(bytes.fromhex(record.signature), record_signing_message(record))
-    except (InvalidSignature, ValueError):
-        return False
-    return True
+    return verify_signature(record.signature, record_signing_message(record), public_key)
 
 
 def load_signers(specs: Sequence[str]) -> dict[str, bytes]:

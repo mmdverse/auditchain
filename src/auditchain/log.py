@@ -235,11 +235,20 @@ class AuditLog:
 
         Save it outside the log's trust boundary; verifying against it later detects
         tail truncation and proves the chain's state as of this point.
+
+        When the log has a ``signing_key``, the checkpoint is signed with it too, so an
+        auditor holding only the public key can verify the anchor itself.
         """
         records = await self.read()
         if not records:
             raise ValueError("cannot checkpoint an empty log")
-        return make_checkpoint(records[-1], self.seal_key, merkle_root([r.hash for r in records]))
+        return make_checkpoint(
+            records[-1],
+            self.seal_key,
+            merkle_root([r.hash for r in records]),
+            signing_key=self._signing_key,
+            signer_id=self.signer_id,
+        )
 
     async def merkle_root(self) -> str:
         """Merkle root over every record currently in the log (see :mod:`auditchain.merkle`)."""
