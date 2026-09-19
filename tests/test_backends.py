@@ -156,3 +156,69 @@ async def test_sqlite_append_many_atomic(tmp_path):
         recs = await log.append_many([(f"u{i}", f"a{i}", "", None) for i in range(4)])
         assert [r.seq for r in recs] == [0, 1, 2, 3]
         assert (await log.verify()).ok
+
+
+def _selected_columns(statement: str) -> list[str]:
+    """The column names between SELECT and FROM."""
+    return [name.strip() for name in statement.split("SELECT", 1)[1].split("FROM", 1)[0].split(",")]
+
+
+def _schema_columns(schema: str) -> set[str]:
+    names = {line.split()[0] for line in schema.splitlines()[2:] if line.strip()}
+    return {name for name in names if name.isidentifier()}
+
+
+def _columns_in(statement: str, *, after: str) -> list[str]:
+    head = statement.split(after, 1)[1].split(")", 1)[0]
+    return [column.strip() for column in head.split(",") if column.strip()]
+
+
+def test_postgres_insert_matches_its_columns():
+    """The statement, its column list and the values must stay the same length.
+
+    A missing ``$10``/``$11`` after the signing columns were added went unnoticed by
+    every local run and only failed in the PostgreSQL job, so it is pinned here where
+    no server is needed.
+    """
+    from auditchain.backends.postgres import _INSERT_SQL, PostgresBackend
+    from auditchain.records import GENESIS_HASH, AuditRecord
+
+    statement = _INSERT_SQL
+    columns = _columns_in(statement, after="(")
+    placeholders = statement.count("$")
+    values = PostgresBackend._row_values(
+        AuditRecord(
+            seq=0,
+            timestamp="2026-01-01T00:00:00.000000Z",
+            actor="sara",
+            action="login",
+            subject="",
+            metadata={},
+            prev_hash=GENESIS_HASH,
+            hash="a" * 64,
+            key_id="k0",
+            signer_id="s0",
+            signature="b" * 128,
+        )
+    )
+    assert len(columns) == placeholders == len(values), (
+        f"{len(columns)} columns, {placeholders} placeholders, {len(values)} values"
+    )
+    assert columns[-2:] == ["signer_id", "signature"]
+
+
+def test_postgres_schema_covers_every_selected_column():
+    from auditchain.backends.postgres import _SCHEMA, _SELECT_SQL
+
+    missing = set(_selected_columns(_SELECT_SQL)) - _schema_columns(_SCHEMA)
+    assert not missing, sorted(missing)
+
+
+def test_sqlite_schema_and_select_agree():
+    from auditchain.backends.sqlite import _SCHEMA, SqliteBackend
+
+    missing = set(_selected_columns(SqliteBackend._SELECT_SQL)) - _schema_columns(_SCHEMA)
+    assert not missing, sorted(missing)
+    columns = {name.strip() for name in SqliteBackend._COLUMNS.split(",")}
+    assert {"signer_id", "signature"} <= columns
+    assert SqliteBackend._SELECT_LAST_SQL.endswith("DESC LIMIT 1")
