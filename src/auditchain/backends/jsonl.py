@@ -14,7 +14,8 @@ from .base import LogCorruptedError, StorageBackend
 class JsonlBackend(StorageBackend):
     """Appends one JSON object per line.
 
-    Each line contains the full payload plus ``hash`` (and ``key_id`` when sealed).
+    Each line contains the full payload plus ``hash`` (and ``key_id`` when sealed,
+    ``signer_id``/``signature`` when signed).
     Lines are never rewritten; verification (re)reads the file and rebuilds the chain.
     """
 
@@ -38,6 +39,12 @@ class JsonlBackend(StorageBackend):
         }
         if record.key_id:
             payload["key_id"] = record.key_id
+        # Only written when present, so files from logs without signatures keep the
+        # exact bytes they had before signing existed.
+        if record.signer_id:
+            payload["signer_id"] = record.signer_id
+        if record.signature:
+            payload["signature"] = record.signature
         return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
     async def append(self, record: AuditRecord) -> None:

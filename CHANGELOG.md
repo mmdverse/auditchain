@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Ed25519 record signatures** (`auditchain[ed25519]`, via `cryptography`):
+  `AuditLog(..., signing_key=..., signer_id=...)` signs every record over
+  `seq:hash:signer_id`, and `verify(signers={...})` checks them against public keys only.
+  This closes the gap HMAC cannot: an attacker who holds the seal key can rewrite a
+  record and recompute the chain, but cannot produce a valid signature. Verification with
+  `signers` is strict — every record must be signed — so signatures cannot simply be
+  stripped. `AuditRecord` gained `signer_id` and `signature` (both outside the hashed
+  payload, so pre-existing logs and unsigned JSONL lines are unaffected); SQLite and
+  Postgres add the columns in place on `init()`. New `auditchain keygen` command and
+  `--signer NAME=PATH|HEX` on `auditchain verify`.
+
 ## 0.2.0 — 2026-08-30
 
 - **Key rotation**: records carry a `key_id` (stored next to the hash, *not* part of
