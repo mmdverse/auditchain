@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`logging.Handler` bridge** (`AuditLogHandler`): attach it to an existing logger and
+  its log calls become audit records. Records are prepared on the emitting thread and
+  written by a daemon worker thread, so `emit()` never blocks and stays safe inside
+  event loops, sync code and thread pools; `flush()`/`close()` bound the draining. The
+  actor defaults to the logger name and can be overridden per handler (`actor=`,
+  `metadata=`) or per record (`extra={"audit_actor", "audit_action", "audit_subject",
+  "audit_metadata"}`); exceptions are captured as a traceback in the metadata, unrelated
+  `extra` keys are ignored, and write failures are counted (`error_count`,
+  `last_error`) instead of reaching the application. `background=False` writes through
+  synchronously for scripts and tests.
+- **`SyncAuditLog` catches up** with the async API: it now accepts `signing_key` /
+  `signer_id` and exposes `public_key`, `merkle_root()`, `inclusion_proof()` and
+  `verify(signers=...)`, so the sync facade can do everything the handler needs.
 - **Merkle inclusion proofs**: `AuditLog.inclusion_proof(seq)` / `merkle_proof()` return
   a path of ~log2(n) hashes proving that one record is part of a log with a given root,
   without disclosing the rest of the records. `auditchain proof` writes the proof and

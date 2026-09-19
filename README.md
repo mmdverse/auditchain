@@ -32,6 +32,8 @@ the whole chain in O(n) and reports the first broken link.
   only, so they can check the log without being able to forge it
 - **Merkle inclusion proofs**: prove that one record belongs to the log using ~log₂n
   hashes and a root you already trust — without revealing the other records
+- **`logging.Handler`**: drop it on an existing logger and the calls you already write
+  become auditable records — written off the application's thread
 - **Checkpoints**: signed anchors that detect tail truncation and prove a chain's
   state at a point in time
 - Batch appends (`append_many`) — one write for many records
@@ -213,6 +215,47 @@ log.close()
 `SyncAuditLog` runs its own event loop per call; use the async API from inside an
 already-running loop.
 
+## Audit the logs you already write
+
+Application logs are verbose and disposable; audit logs are ordered and kept. One
+handler serves both, so the call site does not change:
+
+```python
+import logging
+from auditchain import AuditLog, AuditLogHandler, SqliteBackend
+
+log = AuditLog(SqliteBackend("audit.sqlite"), seal_key=secrets.token_bytes(32))
+logging.getLogger("billing").addHandler(AuditLogHandler(log))
+
+logger.info("invoice.approve %s", invoice_id)     # ← now also an audit record
+```
+
+```json
+{"actor": "billing", "action": "invoice.approve inv-7", "subject": "",
+ "metadata": {"logger": "billing", "level": "INFO", "module": "app", "line": 42,
+              "func": "approve", "amount": 1200}}
+```
+
+Details worth knowing:
+
+- **Nothing blocks the caller.** Records are prepared on the emitting thread (the
+  `LogRecord` is not valid afterwards) and written by a daemon worker thread, so it is
+  safe from async code, sync code and thread pools alike. `handler.flush()` waits until
+  everything queued is on disk; `handler.close()` drains, stops the worker and (with
+  `close_log=True`) closes the log.
+- **One writer, in order.** The chain stays serialized no matter how many threads log.
+- **Attribution is explicit.** The actor defaults to the logger name; override it per
+  record with `extra={"audit_actor": ..., "audit_action": ..., "audit_subject": ...,
+  "audit_metadata": {...}}`, or per handler with `actor=` (string or callable) and
+  `metadata=`.
+- **Unrelated `extra` keys are not copied**, so request ids and process ids do not leak
+  into the audit metadata. Exceptions are captured as a formatted traceback in
+  `metadata["exception"]` (turn off with `include_exception=False`).
+- **A broken log never breaks the application:** failures go to `handleError` and are
+  counted in `handler.error_count` / `handler.last_error`.
+- Set `background=False` to write through synchronously (useful in scripts and tests);
+  it refuses to run inside an event loop, where you want the default instead.
+
 ## Backends
 
 | Backend         | Used for                                  |
@@ -262,7 +305,8 @@ so it drops straight into CI.
   is in the log with this root". An old root stays valid forever — the anchor's
   timestamp and what you do with it are yours to manage.
 - **Single writer:** one process appends at a time. Use a queue/lock for writers;
-  the chain must be serialized.
+  the chain must be serialized. `logging.Handler` with `background=True` (the default)
+  already funnels every thread through one worker, but not across processes.
 - Without a `seal_key`, records are integrity-protected, not authenticated — an
   attacker who can rewrite the log can re-seal it.
 - HMAC also fails against an attacker who holds the seal key: they can rewrite records
@@ -287,7 +331,9 @@ SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضا�
 تشخیص بریده‌شدن انتهای زنجیره؛ امضای Ed25519 روی رکوردها (اختیاری، `auditchain[ed25519]`)
 تا حسابرس فقط با کلید عمومی بتواند لاگ را تایید کند و خودش قادر به جعل نباشد؛ و اثبات
 مرکل: با یک ریشهٔ مورد اعتماد و ~log₂n هش می‌توان ثابت کرد یک رکورد مشخص عضو همین
-لاگ است، بدون افشای بقیهٔ رکوردها. checkpoint ریشهٔ مرکل را هم امضا می‌کند و CLI با
+لاگ است، بدون افشای بقیهٔ رکوردها؛ و یک `logging.Handler` آماده که با اضافه‌کردنش به
+لاگرهای موجود، همان `logger.info(...)`‌هایی که از قبل می‌نویسید به رکورد حسابرسی
+تبدیل می‌شوند (نوشتن در ترد جداگانه، پس مسیر درخواست کند نمی‌شود). checkpoint ریشهٔ مرکل را هم امضا می‌کند و CLI با
 کد خروج مناسب CI کار می‌کند (کد ۱ یعنی زنجیره شکسته یا اثبات نامعتبر).
 
 ## License

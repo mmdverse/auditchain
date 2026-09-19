@@ -13,6 +13,8 @@ proven to be part of a log without disclosing the rest: hand the auditor a signe
 checkpoint once, then ~log2(n) hashes per record.
 
 Async-first, zero runtime dependencies (PostgreSQL and Ed25519 are optional extras).
+An ``AuditLogHandler`` feeds Python's :mod:`logging` into the chain, so existing log
+calls become auditable without touching the call sites.
 """
 
 from .backends import (
@@ -25,6 +27,7 @@ from .backends import (
     StorageBackend,
 )
 from .checkpoint import Checkpoint, load_checkpoint, make_checkpoint, save_checkpoint
+from .handlers import AuditLogHandler
 from .hash import compute_record_hash, verify_record_hash
 from .log import AuditLog
 from .merkle import InclusionProof, ProofStep, merkle_proof, merkle_root
@@ -43,6 +46,7 @@ __version__ = "0.2.0"
 
 __all__ = [
     "AuditLog",
+    "AuditLogHandler",
     "AuditRecord",
     "BackendError",
     "Checkpoint",
