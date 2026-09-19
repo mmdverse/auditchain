@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Merkle inclusion proofs**: `AuditLog.inclusion_proof(seq)` / `merkle_proof()` return
+  a path of ~log2(n) hashes proving that one record is part of a log with a given root,
+  without disclosing the rest of the records. `auditchain proof` writes the proof and
+  `auditchain verify-proof --root|--checkpoint` checks it (exit code 1 on failure).
+  Checkpoints now carry the Merkle root over everything behind them and **sign it**
+  (checkpoint files go 1 → version 2; v1 files still load and verify unchanged), and
+  `verify()` compares the log against that root, so a log that was rebuilt, extended or
+  truncated after the anchor fails with `merkle root mismatch`. The tree follows RFC 6962
+  (domain-separated leaves, promoted odd nodes), so proofs are bound to `(seq, size)` and
+  cannot be replayed or padded.
 - **Ed25519 record signatures** (`auditchain[ed25519]`, via `cryptography`):
   `AuditLog(..., signing_key=..., signer_id=...)` signs every record over
   `seq:hash:signer_id`, and `verify(signers={...})` checks them against public keys only.

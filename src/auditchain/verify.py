@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .checkpoint import Checkpoint
 from .hash import compute_record_hash
+from .merkle import merkle_root
 from .records import GENESIS_HASH, AuditRecord
 from .signing import verify_record_signature
 
@@ -20,6 +21,8 @@ class VerifyReport:
     reason: str | None = None
     #: How many records were checked against an Ed25519 public key.
     signed_records: int = 0
+    #: Merkle root over the records that were checked (see :mod:`auditchain.merkle`).
+    merkle_root: str = ""
 
     def __str__(self) -> str:
         if self.ok:
@@ -149,6 +152,23 @@ def verify_chain(
 
         prev_hash = record.hash
 
+    root = merkle_root([r.hash for r in records])
+    # The root was signed when the checkpoint was written, so a log that no longer
+    # hashes to it was rewritten (or truncated/extended) after that point.
+    if checkpoint is not None and checkpoint.merkle_root and checkpoint.merkle_root != root:
+        return VerifyReport(
+            ok=False,
+            records_checked=len(records),
+            first_error_seq=None,
+            reason="merkle root mismatch: the records do not match the checkpoint",
+            signed_records=signed,
+            merkle_root=root,
+        )
+
     return VerifyReport(
-        ok=True, records_checked=len(records), first_error_seq=None, signed_records=signed
+        ok=True,
+        records_checked=len(records),
+        first_error_seq=None,
+        signed_records=signed,
+        merkle_root=root,
     )

@@ -8,6 +8,10 @@ Records can also be signed with Ed25519 (``auditchain[ed25519]``), which lets an
 auditor verify a log holding only a public key — they cannot forge records, unlike
 with HMAC where the verification secret is also the forging secret.
 
+Checkpoints carry a Merkle root over every record behind them, so one record can be
+proven to be part of a log without disclosing the rest: hand the auditor a signed
+checkpoint once, then ~log2(n) hashes per record.
+
 Async-first, zero runtime dependencies (PostgreSQL and Ed25519 are optional extras).
 """
 
@@ -23,6 +27,7 @@ from .backends import (
 from .checkpoint import Checkpoint, load_checkpoint, make_checkpoint, save_checkpoint
 from .hash import compute_record_hash, verify_record_hash
 from .log import AuditLog
+from .merkle import InclusionProof, ProofStep, merkle_proof, merkle_root
 from .records import GENESIS_HASH, AuditRecord
 from .signing import (
     SignatureError,
@@ -42,10 +47,12 @@ __all__ = [
     "BackendError",
     "Checkpoint",
     "GENESIS_HASH",
+    "InclusionProof",
     "JsonlBackend",
     "LogCorruptedError",
     "MemoryBackend",
     "PostgresBackend",
+    "ProofStep",
     "SqliteBackend",
     "StorageBackend",
     "SignatureError",
@@ -56,6 +63,8 @@ __all__ = [
     "generate_keypair",
     "load_checkpoint",
     "make_checkpoint",
+    "merkle_proof",
+    "merkle_root",
     "save_checkpoint",
     "sign_record",
     "verify_record_signature",
