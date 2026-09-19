@@ -23,8 +23,10 @@ jobs:
         run: |
           ruff check src tests
           ruff format --check src tests
-      - name: Test
-        run: pytest -q
+      - name: Types (mypy --strict)
+        run: mypy
+      - name: Test (with coverage)
+        run: pytest -q --cov --cov-report=term-missing
 
   test-postgres:
     runs-on: ubuntu-latest

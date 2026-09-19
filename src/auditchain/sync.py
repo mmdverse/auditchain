@@ -13,6 +13,7 @@ from typing import Any
 from .backends import StorageBackend
 from .checkpoint import Checkpoint
 from .log import AuditLog
+from .merkle import InclusionProof
 from .records import AuditRecord
 from .verify import VerifyReport
 
@@ -41,7 +42,7 @@ class SyncAuditLog:
         asyncio.run(self._log.init())
 
     @property
-    def public_key(self):  # noqa: ANN201 - mirrors AuditLog.public_key
+    def public_key(self) -> Any:
         """The Ed25519 public key to hand to verifiers, or None when not signing."""
         return self._log.public_key
 
@@ -75,7 +76,7 @@ class SyncAuditLog:
     def merkle_root(self) -> str:
         return asyncio.run(self._log.merkle_root())
 
-    def inclusion_proof(self, seq: int):  # noqa: ANN201 - mirrors AuditLog.inclusion_proof
+    def inclusion_proof(self, seq: int) -> InclusionProof:
         return asyncio.run(self._log.inclusion_proof(seq))
 
     def verify(

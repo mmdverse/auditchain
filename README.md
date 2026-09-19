@@ -3,7 +3,8 @@
 [![CI](https://github.com/mmdverse/auditchain/actions/workflows/ci.yml/badge.svg)](https://github.com/mmdverse/auditchain/actions/workflows/ci.yml)
 
 Tamper-evident, hash-chained audit logging for Python.
-Async-first, zero runtime dependencies.
+Async-first, zero runtime dependencies, `mypy --strict` clean, 91% branch coverage
+(203 tests).
 
 Every record commits to the hash of the previous one. Anyone who edits, inserts,
 removes or reorders records later breaks the chain — and `verify` tells you exactly

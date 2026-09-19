@@ -8,6 +8,7 @@ import sqlite3
 import threading
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from ..records import AuditRecord
 from .base import StorageBackend
@@ -81,7 +82,7 @@ class SqliteBackend(StorageBackend):
         self._conn = await asyncio.to_thread(_init)
 
     @staticmethod
-    def _row_values(record: AuditRecord) -> tuple:
+    def _row_values(record: AuditRecord) -> tuple[Any, ...]:
         return (
             record.seq,
             record.timestamp,
@@ -105,7 +106,7 @@ class SqliteBackend(StorageBackend):
     # fmt: on
 
     @staticmethod
-    def _from_row(row: tuple) -> AuditRecord:
+    def _from_row(row: tuple[Any, ...]) -> AuditRecord:
         return AuditRecord.from_stored(
             {
                 "seq": row[0],

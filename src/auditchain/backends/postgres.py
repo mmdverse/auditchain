@@ -48,7 +48,7 @@ class PostgresBackend(StorageBackend):
         self.table = table
         self._pool: Any = None
 
-    def _require_asyncpg(self):
+    def _require_asyncpg(self) -> Any:
         try:
             import asyncpg  # noqa: F401 - imported for the side effect of the error message
 
@@ -88,7 +88,7 @@ class PostgresBackend(StorageBackend):
             await conn.executemany(_INSERT_SQL.format(table=self.table), rows)
 
     @staticmethod
-    def _row_values(record: AuditRecord) -> tuple:
+    def _row_values(record: AuditRecord) -> tuple[Any, ...]:
         return (
             record.seq,
             record.timestamp,

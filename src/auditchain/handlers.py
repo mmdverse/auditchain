@@ -45,7 +45,16 @@ ACTION_KEY = "audit_action"
 SUBJECT_KEY = "audit_subject"
 METADATA_KEY = "audit_metadata"
 
-_STOP = object()
+
+class _Stop:
+    """Sentinel that tells the worker thread to finish; compared by identity."""
+
+
+#: What the emitting thread hands to the worker: everything already resolved, so the
+#: LogRecord itself never crosses the thread boundary.
+Entry = tuple[str, str, str, dict[str, Any], str]
+
+_STOP = _Stop()
 _EXCEPTION_FORMATTER = logging.Formatter()
 
 __all__ = ["AuditLogHandler"]
@@ -96,7 +105,7 @@ class AuditLogHandler(logging.Handler):
         self._closed = False
         self.error_count = 0
         self.last_error: BaseException | None = None
-        self._queue: queue.Queue = queue.Queue()
+        self._queue: queue.Queue[Entry | _Stop] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         if background:
@@ -133,7 +142,7 @@ class AuditLogHandler(logging.Handler):
             data.update(dict(extra))
         return data
 
-    def _entry(self, record: logging.LogRecord) -> tuple[str, str, str, dict[str, Any], str]:
+    def _entry(self, record: logging.LogRecord) -> Entry:
         action = getattr(record, ACTION_KEY, None) or record.getMessage()
         subject = getattr(record, SUBJECT_KEY, None) or ""
         return (
@@ -190,7 +199,7 @@ class AuditLogHandler(logging.Handler):
             )
         self._write(entry)
 
-    def _write(self, entry: tuple[str, str, str, dict[str, Any], str]) -> None:
+    def _write(self, entry: Entry) -> None:
         actor, action, subject, metadata, timestamp = entry
         try:
             self._run(
@@ -216,7 +225,7 @@ class AuditLogHandler(logging.Handler):
                 while True:
                     entry = self._queue.get()
                     try:
-                        if entry is _STOP:
+                        if isinstance(entry, _Stop):
                             return
                         self._write(entry)
                     finally:

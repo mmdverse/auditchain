@@ -1,11 +1,13 @@
+from typing import Any
+
 import pytest
 
 from auditchain import GENESIS_HASH, AuditRecord
 from auditchain.hash import compute_record_hash, verify_record_hash
 
 
-def _record(**overrides) -> AuditRecord:
-    base = dict(
+def _record(**overrides: Any) -> AuditRecord:
+    base: dict[str, Any] = dict(
         seq=0,
         timestamp="2026-08-30T12:00:00.000000Z",
         actor="sara",
