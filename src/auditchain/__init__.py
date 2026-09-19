@@ -43,7 +43,7 @@ from .signing import (
 from .sync import SyncAuditLog
 from .verify import VerifyReport, verify_chain
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "AuditLog",

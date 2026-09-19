@@ -359,6 +359,10 @@ Read the full argument — threat model, honest limits, and when to anchor diges
 in [Why your audit log needs a hash chain](docs/tamper-evident-audit-logs.md)
 or on [DEV Community](https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-chain-3loo).
 
+Handing this to an auditor? [Verifying an audit log you do not own](docs/verifying-without-the-log.md)
+is the operator/auditor workflow end to end: what to publish, what a failure means, and
+what none of it proves.
+
 ## خلاصهٔ فارسی
 
 **auditchain** یک کتابخانهٔ پایتونی برای لاگ حسابرسیِ ضدتغییر است. هر رکورد با هشِ
