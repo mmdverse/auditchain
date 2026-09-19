@@ -18,7 +18,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: pip install -e ".[dev]"
+        # ed25519 is an optional extra: installed here so signing is really exercised on
+        # every supported Python, and the suite skips those tests when it is absent.
+        run: pip install -e ".[dev,ed25519]"
       - name: Lint (ruff)
         run: |
           ruff check src tests

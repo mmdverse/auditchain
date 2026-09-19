@@ -10,9 +10,15 @@ import time
 import pytest
 
 from auditchain import AuditLog, AuditLogHandler, MemoryBackend, SyncAuditLog
+from auditchain.signing import CRYPTOGRAPHY_AVAILABLE
 from auditchain.verify import verify_chain
 
 SEAL_KEY = b"a-seal-key-long-enough-to-matter"
+
+# Signing is an optional extra; the suite has to pass with and without it.
+requires_cryptography = pytest.mark.skipif(
+    not CRYPTOGRAPHY_AVAILABLE, reason="requires the 'ed25519' extra"
+)
 
 
 def _logger(handler: AuditLogHandler, name: str = "billing", level: int = logging.DEBUG):
@@ -399,6 +405,7 @@ def test_the_handler_leaves_the_log_open_by_default():
     assert len(_records(log)) == 1
 
 
+@requires_cryptography
 def test_sync_facade_can_sign_records():
     facade = SyncAuditLog(MemoryBackend(), signing_key=SEAL_KEY)
     facade.append("sara", "login")

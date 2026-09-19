@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS "{table}" (
 _INSERT_SQL = (
     'INSERT INTO "{table}"'
     " (seq, ts, actor, action, subject, meta, prev_hash, hash, key_id, signer_id, signature)"
-    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
 )
 
 _SELECT_SQL = (

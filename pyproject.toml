@@ -10,15 +10,6 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Mohammad" }]
-# Python 3.10 has no native TOML support for [project.urls], but PEP 621 wants them here;
-# PyPI shows these next to the project, so they are worth filling in.
-[project.urls]
-Homepage = "https://github.com/mmdverse/auditchain"
-Repository = "https://github.com/mmdverse/auditchain"
-Issues = "https://github.com/mmdverse/auditchain/issues"
-Changelog = "https://github.com/mmdverse/auditchain/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/mmdverse/auditchain#readme"
-Article = "https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-chain-3loo"
 keywords = ["audit", "audit-log", "logging", "security", "compliance", "tamper-evident", "hash-chain", "hmac"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -33,6 +24,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/mmdverse/auditchain"
+Repository = "https://github.com/mmdverse/auditchain"
+Issues = "https://github.com/mmdverse/auditchain/issues"
+Changelog = "https://github.com/mmdverse/auditchain/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/mmdverse/auditchain#readme"
+Article = "https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-chain-3loo"
 
 [project.optional-dependencies]
 dev = [
