@@ -60,6 +60,9 @@ class SqliteBackend(StorageBackend):
 
         def _init() -> sqlite3.Connection:
             conn = sqlite3.connect(self.path, check_same_thread=False)
+            # Several processes may share this file; wait for a busy database instead
+            # of failing the append immediately.
+            conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute(_SCHEMA)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_records)")}
             if "key_id" not in columns:
@@ -94,11 +97,30 @@ class SqliteBackend(StorageBackend):
         )
 
     # fmt: off
-    _SELECT_SQL = (
-        "SELECT seq, ts, actor, action, subject, meta, prev_hash, hash, key_id,"
-        " signer_id, signature FROM audit_records ORDER BY seq"
+    _COLUMNS = (
+        "seq, ts, actor, action, subject, meta, prev_hash, hash, key_id, signer_id, signature"
     )
+    _SELECT_SQL = f"SELECT {_COLUMNS} FROM audit_records ORDER BY seq"
+    _SELECT_LAST_SQL = f"SELECT {_COLUMNS} FROM audit_records ORDER BY seq DESC LIMIT 1"
     # fmt: on
+
+    @staticmethod
+    def _from_row(row: tuple) -> AuditRecord:
+        return AuditRecord.from_stored(
+            {
+                "seq": row[0],
+                "ts": row[1],
+                "actor": row[2],
+                "action": row[3],
+                "subject": row[4],
+                "meta": json.loads(row[5]),
+                "prev_hash": row[6],
+                "hash": row[7],
+                "key_id": row[8],
+                "signer_id": row[9],
+                "signature": row[10],
+            }
+        )
 
     async def append(self, record: AuditRecord) -> None:
         def _append() -> None:
@@ -127,26 +149,17 @@ class SqliteBackend(StorageBackend):
         def _load() -> list[AuditRecord]:
             with self._lock:
                 rows = self._connection().execute(self._SELECT_SQL).fetchall()
-            return [
-                AuditRecord.from_stored(
-                    {
-                        "seq": row[0],
-                        "ts": row[1],
-                        "actor": row[2],
-                        "action": row[3],
-                        "subject": row[4],
-                        "meta": json.loads(row[5]),
-                        "prev_hash": row[6],
-                        "hash": row[7],
-                        "key_id": row[8],
-                        "signer_id": row[9],
-                        "signature": row[10],
-                    }
-                )
-                for row in rows
-            ]
+            return [self._from_row(row) for row in rows]
 
         return await asyncio.to_thread(_load)
+
+    async def load_last(self) -> AuditRecord | None:
+        def _load_last() -> AuditRecord | None:
+            with self._lock:
+                row = self._connection().execute(self._SELECT_LAST_SQL).fetchone()
+            return None if row is None else self._from_row(row)
+
+        return await asyncio.to_thread(_load_last)
 
     async def close(self) -> None:
         def _close() -> None:

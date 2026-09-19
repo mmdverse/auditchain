@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Multi-process append safety**: `AuditLog(..., lock_path="audit.lock")` (or
+  `lock=FileLock(...)`) makes several processes share one log. While the lock is held the
+  tail is re-read from the backend (`load_last()`, O(1) on sqlite/postgres, a backwards
+  scan on jsonl) before the next record is built, so writers chain onto the real tail
+  instead of their own stale one. The lock is advisory (`flock` on POSIX,
+  `msvcrt.locking` on Windows), released by the OS if the process dies, supports
+  `timeout=`, and `lock=` accepts any object with `acquire()`/`release()` so a lock that
+  lives with the data (Postgres advisory lock, Redis) can be used across machines.
+  Readers and `verify()` never lock. SQLite connections now set `busy_timeout` instead of
+  failing immediately when another process holds the database.
 - **`logging.Handler` bridge** (`AuditLogHandler`): attach it to an existing logger and
   its log calls become audit records. Records are prepared on the emitting thread and
   written by a daemon worker thread, so `emit()` never blocks and stays safe inside
