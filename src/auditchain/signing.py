@@ -63,17 +63,19 @@ def _require_cryptography() -> None:
 
 def _key_bytes(key: Any, *, expected_length: int, kind: str) -> bytes:
     """Normalize a raw/hex key into bytes of the expected length."""
+    raw: bytes
     if isinstance(key, str):
         try:
-            key = bytes.fromhex(key.strip())
+            raw = bytes.fromhex(key.strip())
         except ValueError as exc:
             raise SignatureError(f"{kind} must be raw bytes or hex") from exc
-    if not isinstance(key, (bytes, bytearray)):
+    elif isinstance(key, (bytes, bytearray)):
+        raw = bytes(key)
+    else:
         raise SignatureError(f"{kind} must be bytes or a hex string")
-    key = bytes(key)
-    if len(key) != expected_length:
-        raise SignatureError(f"{kind} must be {expected_length} bytes, got {len(key)}")
-    return key
+    if len(raw) != expected_length:
+        raise SignatureError(f"{kind} must be {expected_length} bytes, got {len(raw)}")
+    return raw
 
 
 def generate_keypair() -> tuple[bytes, bytes]:
@@ -119,7 +121,7 @@ def record_signing_message(record: AuditRecord) -> bytes:
 def sign_record(record: AuditRecord, private_key: Any) -> str:
     """Return the hex Ed25519 signature for ``record``."""
     key = load_private_key(private_key)
-    return key.sign(record_signing_message(record)).hex()
+    return str(key.sign(record_signing_message(record)).hex())
 
 
 def verify_record_signature(record: AuditRecord, public_key: Any) -> bool:

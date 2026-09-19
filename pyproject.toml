@@ -10,6 +10,15 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Mohammad" }]
+# Python 3.10 has no native TOML support for [project.urls], but PEP 621 wants them here;
+# PyPI shows these next to the project, so they are worth filling in.
+[project.urls]
+Homepage = "https://github.com/mmdverse/auditchain"
+Repository = "https://github.com/mmdverse/auditchain"
+Issues = "https://github.com/mmdverse/auditchain/issues"
+Changelog = "https://github.com/mmdverse/auditchain/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/mmdverse/auditchain#readme"
+Article = "https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-chain-3loo"
 keywords = ["audit", "audit-log", "logging", "security", "compliance", "tamper-evident", "hash-chain", "hmac"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -29,13 +38,19 @@ dependencies = []
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.5",
 ]
 test-all = [
     "auditchain[ed25519,postgres]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.5",
 ]
 postgres = ["asyncpg>=0.30"]
 # Asymmetric signatures: an auditor verifies with a public key and cannot forge.
@@ -56,6 +71,34 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+# the library is checked strictly; the test suite is checked by ruff and by running
+files = ["src"]
+strict = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# optional extras: present in some jobs, absent in others
+module = ["asyncpg", "asyncpg.*", "cryptography", "cryptography.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["auditchain"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+# the PostgreSQL backend is exercised by its own CI job against a real server
+fail_under = 90
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

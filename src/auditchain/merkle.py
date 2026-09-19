@@ -18,13 +18,26 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 LEAF_PREFIX = b"\x00"
 NODE_PREFIX = b"\x01"
 EMPTY_ROOT = hashlib.sha256(b"").hexdigest()
+
+
+def _as_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"malformed inclusion proof: {field_name} must be an integer")
+    return value
+
+
+def _as_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"malformed inclusion proof: {field_name} must be a string")
+    return value
 
 
 def leaf_hash(record_hash: str) -> bytes:
@@ -101,18 +114,24 @@ class InclusionProof:
         Path(path).write_text(self.dumps(indent=2) + "\n", encoding="utf-8")
 
     @classmethod
-    def from_json(cls, payload: dict[str, object]) -> InclusionProof:
-        path = tuple(
-            ProofStep(side=str(step["side"]), hash=str(step["hash"]))
-            for step in payload.get("path", [])  # type: ignore[union-attr]
-        )
-        return cls(
-            seq=int(payload["seq"]),  # type: ignore[arg-type]
-            size=int(payload["size"]),  # type: ignore[arg-type]
-            leaf=str(payload["leaf"]),
-            root=str(payload["root"]),
-            path=path,
-        )
+    def from_json(cls, payload: Mapping[str, Any]) -> InclusionProof:
+        raw_path = payload.get("path", [])
+        if not isinstance(raw_path, list):
+            raise ValueError("malformed inclusion proof: path must be a list")
+        try:
+            path = tuple(
+                ProofStep(side=_as_str(step["side"], "side"), hash=_as_str(step["hash"], "hash"))
+                for step in raw_path
+            )
+            return cls(
+                seq=_as_int(payload["seq"], "seq"),
+                size=_as_int(payload["size"], "size"),
+                leaf=_as_str(payload["leaf"], "leaf"),
+                root=_as_str(payload["root"], "root"),
+                path=path,
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"malformed inclusion proof: {exc}") from exc
 
     @classmethod
     def load(cls, path: str | Path) -> InclusionProof:

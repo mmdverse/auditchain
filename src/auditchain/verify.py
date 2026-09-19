@@ -31,7 +31,9 @@ class VerifyReport:
         return f"FAILED{where}: {self.reason}"
 
 
-def _key_for(record: AuditRecord, seal_key: bytes | None, keyring: dict[str, bytes] | None):
+def _key_for(
+    record: AuditRecord, seal_key: bytes | None, keyring: dict[str, bytes] | None
+) -> bytes | None:
     """The key that sealed ``record``, or None for integrity-only records."""
     if not record.key_id:
         return seal_key

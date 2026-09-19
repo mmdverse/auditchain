@@ -50,7 +50,7 @@ async def _verify(
     expected_count: int | None,
     seal_key_file: Path | None,
     checkpoint_file: Path | None,
-    signers: dict[str, object] | None = None,
+    signers: dict[str, bytes] | None = None,
 ) -> VerifyReport:
     backend = _build_backend(path, fmt)
     seal_key = _read_seal_key(seal_key_file)
