@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from .backends import JsonlBackend, SqliteBackend, StorageBackend
 from .checkpoint import Checkpoint, load_checkpoint, save_checkpoint
@@ -15,6 +16,7 @@ from .signing import (
     SignatureError,
     describe_signers,
     generate_keypair,
+    load_public_key,
     load_signers,
 )
 from .verify import VerifyReport
@@ -44,6 +46,23 @@ def _read_seal_key(seal_key_file: Path | None) -> bytes | None:
     return seal_key_file.read_bytes() if seal_key_file is not None else None
 
 
+def _read_private_key(value: str | None) -> Any:
+    """Accept a path or a hex private seed for ``--signing-key``."""
+    if value is None:
+        return None
+    candidate = Path(value)
+    return candidate.read_bytes() if candidate.exists() else value
+
+
+def _read_public_key(value: str | None) -> Any:
+    """Accept ``--public-key <file>`` or ``--public-key <hex>``."""
+    if value is None:
+        return None
+    candidate = Path(value)
+    raw = candidate.read_bytes() if candidate.exists() else value
+    return load_public_key(raw)
+
+
 async def _verify(
     path: Path,
     fmt: str,
@@ -51,10 +70,15 @@ async def _verify(
     seal_key_file: Path | None,
     checkpoint_file: Path | None,
     signers: dict[str, bytes] | None = None,
+    public_key: object | None = None,
 ) -> VerifyReport:
     backend = _build_backend(path, fmt)
     seal_key = _read_seal_key(seal_key_file)
-    checkpoint = load_checkpoint(checkpoint_file, seal_key) if checkpoint_file is not None else None
+    checkpoint = (
+        load_checkpoint(checkpoint_file, seal_key, public_key)
+        if checkpoint_file is not None
+        else None
+    )
     log = AuditLog(backend, seal_key=seal_key)
     try:
         return await log.verify(
@@ -65,18 +89,27 @@ async def _verify(
 
 
 async def _checkpoint(
-    path: Path, fmt: str, output: Path | None, seal_key_file: Path | None
+    path: Path,
+    fmt: str,
+    output: Path | None,
+    seal_key_file: Path | None,
+    signing_key: str | None = None,
+    signer_id: str = "s0",
 ) -> Path:
     backend = _build_backend(path, fmt)
     seal_key = _read_seal_key(seal_key_file)
-    log = AuditLog(backend, seal_key=seal_key)
+    log = AuditLog(
+        backend, seal_key=seal_key, signing_key=_read_private_key(signing_key), signer_id=signer_id
+    )
     try:
         cp = await log.checkpoint()
     finally:
         await log.close()
     out = output if output is not None else Path(str(path) + ".checkpoint")
     save_checkpoint(cp, out)
-    if cp.signature:
+    if cp.signature_ed25519:
+        print(f"checkpoint written to {out}: seq {cp.seq} (Ed25519-signed by {cp.signer_id})")
+    elif cp.signature:
         print(f"checkpoint written to {out}: seq {cp.seq} (signed)")
     else:
         print(f"checkpoint written to {out}: seq {cp.seq} (unsigned — log has no seal key)")
@@ -106,12 +139,16 @@ async def _proof(
 
 
 def _verify_proof(
-    proof_path: Path, root: str | None, checkpoint_file: Path | None, seal_key_file: Path | None
+    proof_path: Path,
+    root: str | None,
+    checkpoint_file: Path | None,
+    seal_key_file: Path | None,
+    public_key: Any = None,
 ) -> bool:
     proof = InclusionProof.load(proof_path)
     expected = root
     if expected is None and checkpoint_file is not None:
-        checkpoint = load_checkpoint(checkpoint_file, _read_seal_key(seal_key_file))
+        checkpoint = load_checkpoint(checkpoint_file, _read_seal_key(seal_key_file), public_key)
         if not checkpoint.merkle_root:
             raise ValueError(f"{checkpoint_file} carries no merkle root to check against")
         if proof.seq > checkpoint.seq:
@@ -180,6 +217,12 @@ def main(argv: list[str] | None = None) -> int:
         help="verify against this checkpoint anchor (detects tail truncation)",
     )
     verify_parser.add_argument(
+        "--public-key",
+        default=None,
+        metavar="PATH|HEX",
+        help="Ed25519 public key to verify a signed checkpoint or proof anchor",
+    )
+    verify_parser.add_argument(
         "--seal-key-file",
         type=Path,
         default=None,
@@ -215,6 +258,18 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="sign the checkpoint with this HMAC seal key",
+    )
+    checkpoint_parser.add_argument(
+        "--signing-key",
+        default=None,
+        metavar="PATH|HEX",
+        help="sign the checkpoint with this Ed25519 private key, so holders of the "
+        "public key can verify the anchor",
+    )
+    checkpoint_parser.add_argument(
+        "--signer-id",
+        default="s0",
+        help="name to record as the checkpoint signer (default: s0)",
     )
 
     proof_parser = subparsers.add_parser(
@@ -254,6 +309,12 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="take the trusted root from this signed checkpoint",
+    )
+    verify_proof_parser.add_argument(
+        "--public-key",
+        default=None,
+        metavar="PATH|HEX",
+        help="Ed25519 public key to verify a signed checkpoint or proof anchor",
     )
     verify_proof_parser.add_argument(
         "--seal-key-file",
@@ -296,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.seal_key_file,
                     args.checkpoint,
                     signers,
+                    _read_public_key(args.public_key),
                 )
             )
             print(report)
@@ -310,7 +372,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             seal_key = _read_seal_key(args.seal_key_file)
             checkpoint = (
-                load_checkpoint(args.checkpoint, seal_key) if args.checkpoint is not None else None
+                load_checkpoint(
+                    args.checkpoint, seal_key, _read_public_key(getattr(args, "public_key", None))
+                )
+                if args.checkpoint is not None
+                else None
             )
             proof = asyncio.run(_proof(args.path, fmt, args.seq, checkpoint, args.seal_key_file))
             if args.output is not None:
@@ -321,7 +387,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "verify-proof":
-            ok = _verify_proof(args.proof, args.root, args.checkpoint, args.seal_key_file)
+            ok = _verify_proof(
+                args.proof,
+                args.root,
+                args.checkpoint,
+                args.seal_key_file,
+                _read_public_key(args.public_key),
+            )
             proof = InclusionProof.load(args.proof)
             if ok:
                 print(f"OK: record {proof.seq} is part of the log of {proof.size} record(s)")
@@ -338,7 +410,16 @@ def main(argv: list[str] | None = None) -> int:
             if not args.path.exists():
                 print(f"error: {args.path} does not exist", file=sys.stderr)
                 return 2
-            asyncio.run(_checkpoint(args.path, fmt, args.output, args.seal_key_file))
+            asyncio.run(
+                _checkpoint(
+                    args.path,
+                    fmt,
+                    args.output,
+                    args.seal_key_file,
+                    args.signing_key,
+                    args.signer_id,
+                )
+            )
             return 0
     except SignatureError as exc:
         print(f"error: {exc}", file=sys.stderr)

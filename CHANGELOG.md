@@ -2,6 +2,17 @@
 
 ## 0.3.0 — 2026-09-19
 
+- **Ed25519-signed checkpoints**: `AuditLog(..., signing_key=...)` now signs the
+  checkpoint it produces (`checkpoint --signing-key`, `--signer-id`), and the anchor is
+  verified with the public key (`--public-key` on `verify`, `proof` and `verify-proof`,
+  as a file or as hex). The signature covers the same message as the HMAC — sequence,
+  record hash, key id and Merkle root — so a verifier holding only the public key can
+  check the anchor without the secret that could re-seal the log. A signed checkpoint
+  **refuses to load unverified**; when the Ed25519 signature checks out, the HMAC is not
+  requested, since it is the weaker of the two. Checkpoint files move to version 3 when
+  signed (1 and 2 still load unchanged). New helpers `checkpoint_message()`,
+  `verify_checkpoint_signature()`, `sign_message()` and `verify_signature()`.
+
 Four additions, all of them about the same gap: an audit log is only evidence if someone
 who is *not* the operator can check it, and if it keeps working under real deployment
 pressure.

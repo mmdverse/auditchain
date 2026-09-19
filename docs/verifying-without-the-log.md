@@ -18,21 +18,17 @@ Three things, none of which is a secret:
 
 | Artifact | What it gives them | How it travels |
 |---|---|---|
-| The public key | proves *who* wrote each record | a few lines in a config or a published fingerprint |
-| The Merkle root | an anchor they can trust without trusting the log | one hex line, published hourly |
+| The public key | proves *who* wrote each record, and who signed the anchor | a few lines in a config or a published fingerprint |
+| A signed checkpoint | an anchor they can trust without trusting the log | one small JSON file, published hourly |
 | An inclusion proof | proves one record is in that anchored log | ~log₂n hashes — 1,150 bytes for a 7,342-record log |
 
 None of these lets the verifier write, re-seal, or forge anything. That is the whole
 point: the sealing key and the signing key never leave the operator.
 
-Two artifacts are **not** on that list, on purpose:
-
-- **the seal key** — the verifier should not have it, because holding it also means being
-  able to re-seal the log;
-- **the signed checkpoint file** — its HMAC signature is what lets the *operator* prove
-  later that they did not swap the anchor themselves, and checking that signature needs
-  the seal key. For an outsider the anchor travels as the root in plain hex, published
-  somewhere the log's writer cannot rewrite (see the note at the end).
+One artifact is **not** on that list, on purpose: **the seal key**. A verifier should not
+have it, because holding it also means being able to re-seal the log. Everything they
+need instead is public — including the anchor, which is signed with the Ed25519 key
+rather than the HMAC one, so checking it takes the public key and nothing else.
 
 ## The workflow
 
@@ -40,13 +36,14 @@ Two artifacts are **not** on that list, on purpose:
 
 ```bash
 auditchain keygen --private-out signing.key --public-out signing.pub
-auditchain checkpoint audit.sqlite --seal-key-file seal.key --output audit.checkpoint
+auditchain checkpoint audit.sqlite --signing-key signing.key --signer-id ops-2026 \
+  --output audit.checkpoint
 ```
 
 The checkpoint says: *at this moment, the record at sequence 7,341 had this hash, and
-everything up to it hashes to this Merkle root*. It is signed, and it is stored outside
-the log — in a different system, a git repository, a transparency log. Anywhere the
-log's own writer cannot rewrite later.
+everything up to it hashes to this Merkle root*. It is signed with Ed25519 and it is
+stored outside the log — in a different system, a git repository, a transparency log.
+Anywhere the log's own writer cannot rewrite later.
 
 **2. The operator publishes the checkpoint** (web page, S3 object with a retention
 policy, a commit in a public repository) and keeps the log itself where it is.
@@ -54,10 +51,12 @@ policy, a commit in a public repository) and keeps the log itself where it is.
 **3. The verifier checks the whole log, occasionally, if they have it.**
 
 ```bash
-auditchain verify audit.sqlite --signer s0=signing.pub --checkpoint audit.checkpoint --seal-key-file seal.key
+auditchain verify audit.sqlite --signer s0=signing.pub --checkpoint audit.checkpoint \
+  --public-key signing.pub
 ```
 
-...or, without the seal key (they should not have it) and without the log:
+Note what is in that command: two public keys (the records' and the anchor's) and no
+secrets. The anchor is loaded only after its signature checks out.
 
 **4. The verifier checks a single record, on demand.**
 
@@ -71,11 +70,13 @@ auditchain proof audit.sqlite --seq 7341 --checkpoint audit.checkpoint \
 # no other record and no key is in the file
 ```
 
-The verifier checks it against the root they got from the published anchor — with no
-key, no log, and no access to the system:
+The verifier checks it against the published anchor — with no secret, no log, and no
+access to the system:
 
 ```bash
-auditchain verify-proof 7341.proof --root 9f2c1e...b7a4     # the published hex root
+auditchain verify-proof 7341.proof --checkpoint audit.checkpoint --public-key signing.pub
+# or, if they copied the root out of the anchor by hand:
+auditchain verify-proof 7341.proof --root 9f2c1e...b7a4
 ```
 
 Exit code `0` means the record is in the log that produced the published root. Exit code
@@ -142,22 +143,22 @@ aws s3 cp /var/lib/app/checkpoints/ s3://audit-anchors/ --recursive --storage-cl
 
 ```bash
 # quarterly, by an auditor with no access to the application at all
-auditchain verify-proof 7341.proof --root 9f2c1e...b7a4   # from the published anchor
+auditchain verify-proof 7341.proof --checkpoint 20260101T0000 --public-key signing.pub
 ```
 
 That is the asymmetry worth building: the operator needs the keys to write; the auditor
 needs nothing but a root they can check, on hardware they control.
 
-## Where this stands today
+## Both sides are asymmetric now
 
-The pieces above are what the library does now. One gap is worth naming instead of
-hiding:
+- **Records**: `auditchain verify --signer s0=signing.pub` — the writer signs, the
+  verifier cannot forge.
+- **Anchors**: `--signing-key` when the checkpoint is written, `--public-key` when it is
+  read. A signed checkpoint will not load unverified, and the HMAC is not demanded once
+  the Ed25519 signature has checked out.
 
-- **Record signatures are verifiable with a public key** (`auditchain verify --signer
-  s0=signing.pub`) — the write side is asymmetric.
-- **The anchor is not, yet.** A checkpoint's signature is HMAC, so checking it needs the
-  seal key; that is why an outsider takes the root as a plain hex value and relies on
-  *where* it was published for authenticity (a repository they do not control, an
-  object-lock bucket, a transparency log). Signing checkpoints with the Ed25519 key
-  instead would close the gap and let an auditor verify the anchor with the same public
-  key they already have — until then, choose the publishing channel accordingly.
+So the verifier holds two public keys and the artifacts above, and never a secret that
+could rewrite the log. What is still worth being careful about: the **private key** (one
+file, mode 600, off the application server if you can), the **publishing schedule** (a
+gap between anchors is a gap an attacker can use), and the **freshness** point from the
+section above — a valid old anchor proves the past, not the present.
