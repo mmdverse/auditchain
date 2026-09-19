@@ -28,6 +28,8 @@ the whole chain in O(n) and reports the first broken link.
 - Backends: `SqliteBackend`, `JsonlBackend`, `MemoryBackend`, `PostgresBackend`
 - HMAC-SHA256 sealing with **key rotation** (per-record `key_id`), or plain SHA-256
   integrity without a key
+- **Ed25519 signatures** (`auditchain[ed25519]`): an auditor verifies with a public key
+  only, so they can check the log without being able to forge it
 - **Checkpoints**: signed anchors that detect tail truncation and prove a chain's
   state at a point in time
 - Batch appends (`append_many`) — one write for many records
@@ -40,6 +42,7 @@ the whole chain in O(n) and reports the first broken link.
 ```bash
 pip install auditchain                # sqlite / jsonl / memory backends
 pip install "auditchain[postgres]"    # + PostgreSQL backend (asyncpg)
+pip install "auditchain[ed25519]"     # + Ed25519 record signatures (cryptography)
 ```
 
 ## Quickstart (async)
@@ -71,6 +74,58 @@ log = AuditLog(SqliteBackend("audit.sqlite"), seal_key=key)
 Without a `seal_key`, tampering is still detected — but only by integrity; anyone who
 can write the log can rewrite it and re-seal it. Use a key when attackers might have
 write access. Keep the key outside the log (env var, secret manager, file).
+
+## Signing records (Ed25519)
+
+HMAC answers "was this written by someone holding the seal key?" — and anyone who can
+verify also holds the forging secret. Ed25519 splits those apart.
+
+```python
+from auditchain import AuditLog, SqliteBackend, generate_keypair
+
+seed, public_key = generate_keypair()          # or: auditchain keygen
+log = AuditLog(SqliteBackend("audit.sqlite"), signing_key=seed)
+await log.append("alice", "invoice.approve", "inv-1")
+```
+
+Keep the private key; hand the public key to whoever verifies:
+
+```bash
+auditchain keygen --private-out signing.key --public-out signing.pub
+auditchain verify audit.sqlite --signer s0=signing.pub
+```
+
+In code, pass `signers` to `verify`:
+
+```python
+report = await log.verify(signers={"s0": public_key})
+report.signed_records   # how many records were checked against a public key
+```
+
+### What it adds over HMAC
+
+Someone who holds the seal key can rewrite a record, recompute every hash after it, and
+leave the chain perfectly consistent — HMAC cannot tell you. A signature can:
+
+```
+verifying a log an insider rewrote after recomputing the hashes
+  with the HMAC key      → OK: 2 record(s) verified              (undetected)
+  with the public key    → FAILED at seq 0: signature mismatch: the record was
+                           rewritten without the signing key
+```
+
+Design notes:
+
+- The signature covers `seq:hash:signer_id`. The hash already commits to the previous
+  hash and the payload, so a signature cannot move to another record or another chain
+  position.
+- Signature fields are stored next to the record but are **not part of the hashed
+  payload**, exactly like `key_id`. Logs written before signing existed keep verifying,
+  and unsigned JSONL lines are byte-for-byte unchanged.
+- Passing `signers` makes verification **strict**: every record must carry a valid
+  signature. Without that rule an attacker holding the seal key could simply delete the
+  signatures and still pass the hash checks.
+- Signatures are independent of sealing, so you can use either or both.
 
 ## Key rotation
 
@@ -178,6 +233,9 @@ so it drops straight into CI.
   the chain must be serialized.
 - Without a `seal_key`, records are integrity-protected, not authenticated — an
   attacker who can rewrite the log can re-seal it.
+- HMAC also fails against an attacker who holds the seal key: they can rewrite records
+  and recompute the chain. Only Ed25519 signatures (`signing_key`) survive that, because
+  verification needs just the public key.
 - **Key rotation only helps if you control the keyring.** Store retired keys safely;
   losing a key means the records sealed with it fail verification.
 
@@ -194,7 +252,9 @@ or on [DEV Community](https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-ch
 بنابراین هر تغییر بعدی — ویرایش، جابه‌جایی، حذف یا درج — زنجیره را می‌شکند و
 `verify` دقیقاً نشان می‌دهد کجا. بدون وابستگی، async-first؛ بک‌اندهای
 SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضاشده (checkpoint) برای
-تشخیص بریده‌شدن انتهای زنجیره؛ و CLI با کد خروج مناسب CI (کد ۱ یعنی زنجیره شکسته).
+تشخیص بریده‌شدن انتهای زنجیره؛ امضای Ed25519 روی رکوردها (اختیاری، `auditchain[ed25519]`)
+تا حسابرس فقط با کلید عمومی بتواند لاگ را تایید کند و خودش قادر به جعل نباشد؛ و CLI با
+کد خروج مناسب CI (کد ۱ یعنی زنجیره شکسته).
 
 ## License
 

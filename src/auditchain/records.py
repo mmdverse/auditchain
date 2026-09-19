@@ -27,12 +27,20 @@ class AuditRecord:
     #: rotation in 0.2 kept every v0.1 log verifiable. Empty for integrity-only
     #: (SHA-256) records and for records written before 0.2.
     key_id: str = ""
+    #: Identifier of the Ed25519 key that signed this record. Empty when the record
+    #: is not signed. Like ``key_id`` it is not part of the hashed payload, so a log
+    #: written before signing existed stays verifiable.
+    signer_id: str = ""
+    #: Hex Ed25519 signature over ``seq:hash:signer_id`` (see
+    #: :func:`auditchain.signing.record_signing_message`). Empty when not signed.
+    signature: str = ""
 
     def to_payload_dict(self) -> dict[str, Any]:
         """All fields that participate in the hash, as a JSON-safe dict.
 
-        ``key_id`` is intentionally excluded: it selects the verification key and
-        is not covered by the hash (see the class docstring).
+        ``key_id``, ``signer_id`` and ``signature`` are intentionally excluded: they
+        describe *how* a record was authenticated rather than what it says. The
+        signature covers the hash, so it still commits to every field below.
         """
         return {
             "seq": self.seq,
@@ -64,4 +72,6 @@ class AuditRecord:
             prev_hash=str(stored["prev_hash"]),
             hash=str(stored["hash"]),
             key_id=str(stored.get("key_id", "")),
+            signer_id=str(stored.get("signer_id", "")),
+            signature=str(stored.get("signature", "")),
         )

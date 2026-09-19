@@ -11,6 +11,7 @@ from .backends import StorageBackend
 from .checkpoint import Checkpoint, make_checkpoint
 from .hash import compute_record_hash
 from .records import GENESIS_HASH, AuditRecord
+from .signing import load_private_key, sign_record
 from .verify import VerifyReport, verify_chain
 
 _MIN_KEY_LENGTH = 16
@@ -34,6 +35,11 @@ class AuditLog:
     ``key_id`` labels the current key (stored with each sealed record, outside the
     hashed payload, so v0.1 logs remain verifiable). ``keyring`` keeps older keys so
     that :meth:`verify` can still validate records sealed before :meth:`rotate`.
+
+    ``signing_key`` adds an Ed25519 signature on top of sealing, and solves the one
+    thing HMAC cannot: an auditor holding only the public key can verify the log but
+    cannot forge records, because they never hold the signing key. Requires the
+    optional ``auditchain[ed25519]`` extra.
     """
 
     def __init__(
@@ -43,12 +49,18 @@ class AuditLog:
         seal_key: bytes | None = None,
         key_id: str = "k0",
         keyring: dict[str, bytes] | None = None,
+        signing_key: Any | None = None,
+        signer_id: str = "s0",
     ) -> None:
         if seal_key is not None and len(seal_key) < _MIN_KEY_LENGTH:
             raise ValueError(f"seal_key must be at least {_MIN_KEY_LENGTH} bytes")
         self.backend = backend
         self.seal_key = seal_key
         self.key_id = key_id
+        self._signing_key = load_private_key(signing_key) if signing_key is not None else None
+        if self._signing_key is not None and not signer_id:
+            raise ValueError("signer_id must not be empty when signing_key is set")
+        self.signer_id = signer_id
         self._keyring: dict[str, bytes] = dict(keyring or {})
         if seal_key is not None:
             self._keyring[key_id] = seal_key
@@ -93,6 +105,9 @@ class AuditLog:
             prev_hash=prev_hash,
             hash="",
             key_id=self.key_id if self.seal_key is not None else "",
+            # The id is set before hashing so the signature can cover it. It stays
+            # out of the hashed payload (see AuditRecord.to_payload_dict).
+            signer_id=self.signer_id if self._signing_key is not None else "",
         )
 
     def _seal(self, record: AuditRecord) -> AuditRecord:
@@ -100,7 +115,12 @@ class AuditLog:
             record_hash = compute_record_hash(record, self.seal_key)
         except TypeError as exc:
             raise ValueError("metadata must be JSON-serializable") from exc
-        return replace(record, hash=record_hash)
+        sealed = replace(record, hash=record_hash)
+        if self._signing_key is None:
+            return sealed
+        # The signature covers the finished hash, so it commits to the whole chain
+        # position and cannot be moved to another record.
+        return replace(sealed, signature=sign_record(sealed, self._signing_key))
 
     async def append(
         self,
@@ -168,6 +188,11 @@ class AuditLog:
         self._keyring[new_key_id] = new_seal_key
         return marker
 
+    @property
+    def public_key(self) -> Any | None:
+        """The Ed25519 public key auditors need, or None when the log is not signed."""
+        return self._signing_key.public_key() if self._signing_key is not None else None
+
     async def read(self) -> list[AuditRecord]:
         """Load every record, in chain order."""
         if not self._inited:
@@ -186,7 +211,11 @@ class AuditLog:
         return make_checkpoint(records[-1], self.seal_key)
 
     async def verify(
-        self, *, expected_count: int | None = None, checkpoint: Checkpoint | None = None
+        self,
+        *,
+        expected_count: int | None = None,
+        checkpoint: Checkpoint | None = None,
+        signers: dict[str, Any] | None = None,
     ) -> VerifyReport:
         """Check the whole chain. See :func:`auditchain.verify_chain`."""
         try:
@@ -196,12 +225,19 @@ class AuditLog:
         keyring = dict(self._keyring)
         if self.seal_key is not None:
             keyring.setdefault(self.key_id, self.seal_key)
+        # When the log signs its own records, verification must require signatures on
+        # every record: otherwise an attacker with the seal key could strip the
+        # signatures and still pass the hash checks.
+        required = dict(signers or {})
+        if self._signing_key is not None:
+            required.setdefault(self.signer_id, self._signing_key.public_key())
         return verify_chain(
             records,
             self.seal_key,
             expected_count=expected_count,
             keyring=keyring or None,
             checkpoint=checkpoint,
+            signers=required or None,
         )
 
 

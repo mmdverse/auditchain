@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from .checkpoint import Checkpoint
 from .hash import compute_record_hash
 from .records import GENESIS_HASH, AuditRecord
+from .signing import verify_record_signature
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,8 @@ class VerifyReport:
     records_checked: int
     first_error_seq: int | None
     reason: str | None = None
+    #: How many records were checked against an Ed25519 public key.
+    signed_records: int = 0
 
     def __str__(self) -> str:
         if self.ok:
@@ -41,6 +44,7 @@ def verify_chain(
     expected_count: int | None = None,
     keyring: dict[str, bytes] | None = None,
     checkpoint: Checkpoint | None = None,
+    signers: dict[str, object] | None = None,
 ) -> VerifyReport:
     """Recompute and check every link of the chain in O(n).
 
@@ -54,6 +58,10 @@ def verify_chain(
     ``keyring`` maps key ids to seal keys (needed after :meth:`AuditLog.rotate`);
     records carry their own ``key_id`` next to the hash (outside the hashed payload),
     so v0.1 logs without key ids stay verifiable with the plain ``seal_key``.
+
+    ``signers`` maps signer ids to Ed25519 public keys. When it is given, *every*
+    record must carry a signature from a known signer: an attacker who holds the seal
+    key could otherwise strip the signatures and still pass the hash checks.
     """
     if checkpoint is not None:
         if len(records) <= checkpoint.seq:
@@ -79,6 +87,7 @@ def verify_chain(
             reason=f"count mismatch: {len(records)} record(s), expected {expected_count}",
         )
 
+    signed = 0
     prev_hash = GENESIS_HASH
     for index, record in enumerate(records):
         if record.seq != index:
@@ -110,6 +119,36 @@ def verify_chain(
                 first_error_seq=record.seq,
                 reason="hash mismatch: the record was modified",
             )
+
+        if signers is not None:
+            # Checked after the hash: the signature covers the hash, so a broken hash
+            # is already reported above and never reported as a signature problem.
+            if not record.signature:
+                return VerifyReport(
+                    ok=False,
+                    records_checked=index,
+                    first_error_seq=record.seq,
+                    reason="missing signature: the record is not signed",
+                )
+            public_key = signers.get(record.signer_id)
+            if public_key is None:
+                return VerifyReport(
+                    ok=False,
+                    records_checked=index,
+                    first_error_seq=record.seq,
+                    reason=f"unknown signer_id {record.signer_id!r}: pass the matching public key",
+                )
+            if not verify_record_signature(record, public_key):
+                return VerifyReport(
+                    ok=False,
+                    records_checked=index,
+                    first_error_seq=record.seq,
+                    reason="signature mismatch: the record was rewritten without the signing key",
+                )
+            signed += 1
+
         prev_hash = record.hash
 
-    return VerifyReport(ok=True, records_checked=len(records), first_error_seq=None)
+    return VerifyReport(
+        ok=True, records_checked=len(records), first_error_seq=None, signed_records=signed
+    )

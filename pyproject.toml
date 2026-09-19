@@ -31,7 +31,15 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
+test-all = [
+    "auditchain[ed25519,postgres]",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
 postgres = ["asyncpg>=0.30"]
+# Asymmetric signatures: an auditor verifies with a public key and cannot forge.
+ed25519 = ["cryptography>=42"]
 
 [project.scripts]
 auditchain = "auditchain.__main__:main"

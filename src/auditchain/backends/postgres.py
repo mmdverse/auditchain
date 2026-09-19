@@ -19,17 +19,20 @@ CREATE TABLE IF NOT EXISTS "{table}" (
     meta      TEXT NOT NULL DEFAULT '{{}}',
     prev_hash TEXT NOT NULL,
     hash      TEXT NOT NULL,
-    key_id    TEXT NOT NULL DEFAULT ''
+    key_id    TEXT NOT NULL DEFAULT '',
+    signer_id TEXT NOT NULL DEFAULT '',
+    signature TEXT NOT NULL DEFAULT ''
 )
 """
 
 _INSERT_SQL = (
-    'INSERT INTO "{table}" (seq, ts, actor, action, subject, meta, prev_hash, hash, key_id)'
+    'INSERT INTO "{table}"'
+    " (seq, ts, actor, action, subject, meta, prev_hash, hash, key_id, signer_id, signature)"
     " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
 )
 
 _SELECT_SQL = (
-    "SELECT seq, ts, actor, action, subject, meta, prev_hash, hash, key_id"
+    "SELECT seq, ts, actor, action, subject, meta, prev_hash, hash, key_id, signer_id, signature"
     ' FROM "{table}" ORDER BY seq'
 )
 
@@ -61,6 +64,16 @@ class PostgresBackend(StorageBackend):
             self._pool = await asyncpg.create_pool(self.dsn)
         async with self._pool.acquire() as conn:
             await conn.execute(_SCHEMA.format(table=self.table))
+            # Tables created before signing existed need the new columns; adding a
+            # column with a default backfills existing rows.
+            await conn.execute(
+                f'ALTER TABLE "{self.table}" ADD COLUMN IF NOT EXISTS'
+                " signer_id TEXT NOT NULL DEFAULT ''"
+            )
+            await conn.execute(
+                f'ALTER TABLE "{self.table}" ADD COLUMN IF NOT EXISTS'
+                " signature TEXT NOT NULL DEFAULT ''"
+            )
 
     async def append(self, record: AuditRecord) -> None:
         async with self._pool.acquire() as conn:
@@ -86,6 +99,8 @@ class PostgresBackend(StorageBackend):
             record.prev_hash,
             record.hash,
             record.key_id,
+            record.signer_id,
+            record.signature,
         )
 
     async def load(self) -> list[AuditRecord]:
@@ -103,6 +118,8 @@ class PostgresBackend(StorageBackend):
                     "prev_hash": row["prev_hash"],
                     "hash": row["hash"],
                     "key_id": row["key_id"],
+                    "signer_id": row["signer_id"],
+                    "signature": row["signature"],
                 }
             )
             for row in rows

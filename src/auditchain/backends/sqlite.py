@@ -13,8 +13,9 @@ from ..records import AuditRecord
 from .base import StorageBackend
 
 _INSERT_SQL = (
-    "INSERT INTO audit_records (seq, ts, actor, action, subject, meta, prev_hash, hash, key_id)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO audit_records"
+    " (seq, ts, actor, action, subject, meta, prev_hash, hash, key_id, signer_id, signature)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _SCHEMA = """
@@ -27,7 +28,9 @@ CREATE TABLE IF NOT EXISTS audit_records (
     meta      TEXT NOT NULL DEFAULT '{}',
     prev_hash TEXT NOT NULL,
     hash      TEXT NOT NULL,
-    key_id    TEXT NOT NULL DEFAULT ''
+    key_id    TEXT NOT NULL DEFAULT '',
+    signer_id TEXT NOT NULL DEFAULT '',
+    signature TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -38,8 +41,8 @@ class SqliteBackend(StorageBackend):
     The sqlite3 module is synchronous, so all calls run through ``asyncio.to_thread``
     with a lock; this keeps the library free of runtime dependencies.
 
-    Existing v0.1 databases (without the ``key_id`` column) are migrated in place on
-    ``init()``; their records stay verifiable.
+    Existing databases are migrated in place on ``init()``: v0.1 ones gain ``key_id``,
+    and pre-signing ones gain ``signer_id``/``signature``. Their records stay verifiable.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -61,6 +64,14 @@ class SqliteBackend(StorageBackend):
             columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_records)")}
             if "key_id" not in columns:
                 conn.execute("ALTER TABLE audit_records ADD COLUMN key_id TEXT NOT NULL DEFAULT ''")
+            if "signer_id" not in columns:
+                conn.execute(
+                    "ALTER TABLE audit_records ADD COLUMN signer_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "signature" not in columns:
+                conn.execute(
+                    "ALTER TABLE audit_records ADD COLUMN signature TEXT NOT NULL DEFAULT ''"
+                )
             conn.commit()
             return conn
 
@@ -78,12 +89,14 @@ class SqliteBackend(StorageBackend):
             record.prev_hash,
             record.hash,
             record.key_id,
+            record.signer_id,
+            record.signature,
         )
 
     # fmt: off
     _SELECT_SQL = (
-        "SELECT seq, ts, actor, action, subject, meta, prev_hash, hash, key_id"
-        " FROM audit_records ORDER BY seq"
+        "SELECT seq, ts, actor, action, subject, meta, prev_hash, hash, key_id,"
+        " signer_id, signature FROM audit_records ORDER BY seq"
     )
     # fmt: on
 
@@ -126,6 +139,8 @@ class SqliteBackend(StorageBackend):
                         "prev_hash": row[6],
                         "hash": row[7],
                         "key_id": row[8],
+                        "signer_id": row[9],
+                        "signature": row[10],
                     }
                 )
                 for row in rows
