@@ -10,6 +10,7 @@ from typing import Any
 from .backends import StorageBackend
 from .checkpoint import Checkpoint, make_checkpoint
 from .hash import compute_record_hash
+from .merkle import InclusionProof, merkle_proof, merkle_root
 from .records import GENESIS_HASH, AuditRecord
 from .signing import load_private_key, sign_record
 from .verify import VerifyReport, verify_chain
@@ -208,7 +209,22 @@ class AuditLog:
         records = await self.read()
         if not records:
             raise ValueError("cannot checkpoint an empty log")
-        return make_checkpoint(records[-1], self.seal_key)
+        return make_checkpoint(records[-1], self.seal_key, merkle_root([r.hash for r in records]))
+
+    async def merkle_root(self) -> str:
+        """Merkle root over every record currently in the log (see :mod:`auditchain.merkle`)."""
+        records = await self.read()
+        return merkle_root([r.hash for r in records])
+
+    async def inclusion_proof(self, seq: int) -> InclusionProof:
+        """Prove that the record at ``seq`` is part of this log.
+
+        The proof is ~log2(n) hashes; hand it to someone who holds a trusted root (a
+        signed checkpoint, published hourly, say) and they can confirm this one record
+        without seeing the rest.
+        """
+        records = await self.read()
+        return merkle_proof([r.hash for r in records], seq)
 
     async def verify(
         self,

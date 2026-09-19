@@ -30,6 +30,8 @@ the whole chain in O(n) and reports the first broken link.
   integrity without a key
 - **Ed25519 signatures** (`auditchain[ed25519]`): an auditor verifies with a public key
   only, so they can check the log without being able to forge it
+- **Merkle inclusion proofs**: prove that one record belongs to the log using ~log₂n
+  hashes and a root you already trust — without revealing the other records
 - **Checkpoints**: signed anchors that detect tail truncation and prove a chain's
   state at a point in time
 - Batch appends (`append_many`) — one write for many records
@@ -173,6 +175,30 @@ Checkpoints with a seal key are signed (HMAC-SHA256), so a forged or edited
 checkpoint file is rejected. Without a key, the checkpoint is unsigned and only as
 trustworthy as the place you store it.
 
+A checkpoint also carries the **Merkle root** of every record behind it, and the
+signature covers that root — which is what makes single-record proofs possible:
+
+```bash
+auditchain checkpoint audit.sqlite --seal-key-file seal.key   # anchors seq + merkle root
+auditchain proof audit.sqlite --seq 42 --output 42.proof      # ~log2(n) hashes
+auditchain verify-proof 42.proof --checkpoint audit.sqlite.checkpoint --seal-key-file seal.key
+```
+
+```python
+proof = await log.inclusion_proof(42)
+proof.verify(trusted_root)      # True
+```
+
+`verify-proof` exits 1 on failure, so a third party can gate on it in CI. Publish the
+checkpoint somewhere you cannot rewrite it, hand out proofs, and an auditor confirms any
+single record without seeing the rest of the log — and without holding your seal key.
+
+The tree is the RFC 6962 construction: leaves are `SHA256(0x00 || record_hash)`,
+interior nodes are `SHA256(0x01 || left || right)`, and a node with an odd number of
+children is promoted instead of duplicated. The prefix stops a leaf hash from passing as
+an interior node, and promoting removes the classic "duplicate the last hash" ambiguity,
+so a proof cannot be replayed at a different size. Proofs commit to `(seq, size)`.
+
 ## Sync API
 
 ```python
@@ -229,6 +255,12 @@ so it drops straight into CI.
 - **Not detectable from the chain alone, without an anchor:** removal of the *last*
   records. Keep a `checkpoint` outside the log's trust boundary, or pass
   `expected_count` to `verify()`.
+- A checkpoint's Merkle root pins the *content* of everything behind it, not just the
+  tail hash: a log that was rewritten, extended or truncated afterwards fails with
+  `merkle root mismatch`, even if every hash in it was recomputed with the real key.
+- **Inclusion proofs prove membership, not freshness.** A proof only says "this record
+  is in the log with this root". An old root stays valid forever — the anchor's
+  timestamp and what you do with it are yours to manage.
 - **Single writer:** one process appends at a time. Use a queue/lock for writers;
   the chain must be serialized.
 - Without a `seal_key`, records are integrity-protected, not authenticated — an
@@ -253,8 +285,10 @@ or on [DEV Community](https://dev.to/mmdverse/why-your-audit-log-needs-a-hash-ch
 `verify` دقیقاً نشان می‌دهد کجا. بدون وابستگی، async-first؛ بک‌اندهای
 SQLite/JSONL/Postgres؛ چرخش کلید HMAC با keyring؛ لنگر امضاشده (checkpoint) برای
 تشخیص بریده‌شدن انتهای زنجیره؛ امضای Ed25519 روی رکوردها (اختیاری، `auditchain[ed25519]`)
-تا حسابرس فقط با کلید عمومی بتواند لاگ را تایید کند و خودش قادر به جعل نباشد؛ و CLI با
-کد خروج مناسب CI (کد ۱ یعنی زنجیره شکسته).
+تا حسابرس فقط با کلید عمومی بتواند لاگ را تایید کند و خودش قادر به جعل نباشد؛ و اثبات
+مرکل: با یک ریشهٔ مورد اعتماد و ~log₂n هش می‌توان ثابت کرد یک رکورد مشخص عضو همین
+لاگ است، بدون افشای بقیهٔ رکوردها. checkpoint ریشهٔ مرکل را هم امضا می‌کند و CLI با
+کد خروج مناسب CI کار می‌کند (کد ۱ یعنی زنجیره شکسته یا اثبات نامعتبر).
 
 ## License
 
