@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-19
+
+Four additions, all of them about the same gap: an audit log is only evidence if someone
+who is *not* the operator can check it, and if it keeps working under real deployment
+pressure.
 
 - **Multi-process append safety**: `AuditLog(..., lock_path="audit.lock")` (or
   `lock=FileLock(...)`) makes several processes share one log. While the lock is held the
